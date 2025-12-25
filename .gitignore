@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Swift / SPM
+.build/
+.swiftpm/
+
+# Xcode
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+
+# Build Artifacts
+*.app
+*.dSYM
+
+# Script generated files
+*.dmg
+*_tmp.dmg
+dmg_staging/
+
+# Editors
+.vscode/
