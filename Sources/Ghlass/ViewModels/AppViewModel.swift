@@ -55,10 +55,12 @@ class AppViewModel: ObservableObject {
             // Unread Filter
             if showUnreadOnly && !notification.unread {
                 // Keep the currently selected/viewed notification visible even if read
-                let isSelected = (selectedNotificationId == notification.id) || selectedNotificationIds.contains(notification.id)
-                let isLastRead = (lastReadNotificationId == notification.id)
+                let isSelected = (selectedNotificationId == notification.id)
                 
-                if !isSelected && !isLastRead {
+                // We want the item to disappear when we select another one.
+                // So we only keep it if it is the CURRENTLY selected one.
+                
+                if !isSelected {
                     return false
                 }
             }
@@ -82,12 +84,56 @@ class AppViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
         do {
-            let fetched = try await GitHubService.shared.fetchNotifications()
-            self.notifications = fetched.filter { 
-                DatabaseService.shared.shouldShowNotification(notificationId: $0.id, currentUpdatedAt: $0.updatedAt)
+            // 1. Sync: Get last sync time from DB
+            let lastSync = DatabaseService.shared.getLastSyncTime()
+            
+            // 2. Fetch from GitHub
+            let fetched = try await GitHubService.shared.fetchNotifications(since: lastSync)
+            
+            // 3. Upsert threads to DB and fetch details for Issues/PRs
+            for notification in fetched {
+                DatabaseService.shared.upsertNotificationThread(notification)
+                
+                // Fetch details if Issue or PR
+                if (notification.subject.type == "Issue" || notification.subject.type == "PullRequest"),
+                   let url = notification.subject.url {
+                    
+                    // We need to fetch detail to get title, state, etc.
+                    // Note: GitHubService.fetchResourceDetail returns GitHubResourceDetail
+                    // We need to pass repoFullName, number, type to upsertIssuePr
+                    // notification.repository.fullName is available
+                    // notification.subjectId gives the number (usually)
+                    
+                    if let numberString = notification.subjectId, let number = Int(numberString) {
+                        do {
+                            let detail = try await GitHubService.shared.fetchResourceDetail(url: url)
+                            DatabaseService.shared.upsertIssuePr(
+                                issue: detail,
+                                repoFullName: notification.repository.fullName,
+                                number: number,
+                                type: notification.subject.type
+                            )
+                        } catch {
+                            print("Failed to sync detail for \(url): \(error)")
+                        }
+                    }
+                }
             }
+            
+            // 4. Load from DB to UI
+            self.notifications = DatabaseService.shared.getAllNotificationThreads()
+            
+            // 5. Load details from DB to cache so UI shows correct status icons
+            let localDetails = DatabaseService.shared.getAllIssueDetails()
+            self.detailsCache.merge(localDetails) { (_, new) in new }
+            
         } catch {
             self.errorMessage = "Failed to fetch notifications: \(error.localizedDescription)"
+            // Even if fetch fails, load from DB
+            self.notifications = DatabaseService.shared.getAllNotificationThreads()
+            
+            let localDetails = DatabaseService.shared.getAllIssueDetails()
+            self.detailsCache.merge(localDetails) { (_, new) in new }
         }
         isLoading = false
     }
@@ -99,91 +145,110 @@ class AppViewModel: ObservableObject {
     
     func markAsDone(ids: [String]) async {
         // Save state to DB
-        let itemsToMark = notifications.filter { ids.contains($0.id) }
-        for item in itemsToMark {
-            DatabaseService.shared.markNotificationAsDone(notificationId: item.id, updatedAt: item.updatedAt)
+        for id in ids {
+            DatabaseService.shared.markNotificationAsDone(threadId: id)
         }
 
-        // Optimistic update: always remove from list as requested
-        notifications.removeAll { ids.contains($0.id) }
-        
-        // Clear selection if needed
-        selectedNotificationIds.subtract(ids)
-        if let selected = selectedNotificationId, ids.contains(selected) {
-            selectedNotificationId = nil
+        // Optimistic update
+        withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+            notifications.removeAll { ids.contains($0.id) }
+            
+            // Clear selection if needed
+            selectedNotificationIds.subtract(ids)
+            if let selected = selectedNotificationId, ids.contains(selected) {
+                selectedNotificationId = nil
+            }
         }
         
-        // Perform API calls
         for id in ids {
-            do {
-                try await GitHubService.shared.markAsDone(notificationId: id)
-            } catch {
-                print("Failed to mark notification \(id) as done: \(error)")
-                // In a robust app, we might restore the item on failure
+            Task {
+                try? await GitHubService.shared.markAsDone(notificationId: id)
             }
+        }
+    }
+
+    func markAsRead(id: String) async {
+        // 1. Update local DB
+        DatabaseService.shared.markNotificationAsRead(threadId: id)
+        
+        // 2. Update memory (notifications array) so UI reflects change
+        // We need to update the `unread` property of the item in `notifications`
+        if let index = notifications.firstIndex(where: { $0.id == id }) {
+            var updated = notifications[index]
+            // We can't set `unread` directly if it's let, but we can reconstruct
+            // Actually GitHubNotification is a struct, we can use the helper or create new
+            updated = updated.markedAsRead()
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                notifications[index] = updated
+            }
+        }
+        
+        // 3. Sync to GitHub (mark as read)
+        Task {
+            try? await GitHubService.shared.markAsRead(notificationId: id)
         }
     }
     
     func fetchDetail(for notification: GitHubNotification) async {
-        guard let url = notification.subject.url else { return }
-        
-        if detailsCache[url] != nil {
-            if notification.unread {
-                Task {
-                    try? await GitHubService.shared.markAsRead(notificationId: notification.id)
-                    await MainActor.run {
-                        // Set lastReadNotificationId BEFORE modifying the notification to ensure
-                        // the filter logic sees it as "last read" during the update cycle.
-                        self.lastReadNotificationId = notification.id
-                        
-                        if let index = self.notifications.firstIndex(where: { $0.id == notification.id }) {
-                            self.notifications[index] = self.notifications[index].markedAsRead()
-                        }
-                    }
-                }
-            }
+        // Fetch latest details and comments from GitHub API when a notification is selected
+        guard let url = notification.subject.url else {
+            print("⚠️ No subject URL for notification: \(notification.subject.title)")
             return
         }
         
-        if loadingDetails.contains(url) { return }
+        // 1. Check if already loading to prevent duplicate requests
+        if loadingDetails.contains(url) {
+            print("⏳ Already loading details for: \(notification.subject.title)")
+            return
+        }
         
-        // Clear any previous failure for this URL
+        // 2. Mark as loading and clear any previous errors
+        loadingDetails.insert(url)
         failedDetails.removeValue(forKey: url)
         
-        loadingDetails.insert(url)
+        print("🔄 Fetching details for: \(notification.subject.title)")
+        print("   Type: \(notification.subject.type)")
+        print("   URL: \(url)")
+        
         do {
+            // 3. Fetch latest details from GitHub API
             let detail = try await GitHubService.shared.fetchResourceDetail(url: url)
             detailsCache[url] = detail
+            print("✓ Fetched detail - State: \(detail.state), Number: \(detail.number)")
             
-            if notification.unread {
-                Task {
-                    try? await GitHubService.shared.markAsRead(notificationId: notification.id)
-                    await MainActor.run {
-                        // Set lastReadNotificationId BEFORE modifying the notification to ensure
-                        // the filter logic sees it as "last read" during the update cycle.
-                        self.lastReadNotificationId = notification.id
-                        
-                        if let index = self.notifications.firstIndex(where: { $0.id == notification.id }) {
-                            self.notifications[index] = self.notifications[index].markedAsRead()
-                        }
-                    }
-                }
+            // 4. Update DB if it's an Issue/PR
+            if (notification.subject.type == "Issue" || notification.subject.type == "PullRequest"),
+               let numberString = notification.subjectId, let number = Int(numberString) {
+                DatabaseService.shared.upsertIssuePr(
+                    issue: detail,
+                    repoFullName: notification.repository.fullName,
+                    number: number,
+                    type: notification.subject.type
+                )
+                print("✓ Updated DB for \(notification.subject.type) #\(number)")
             }
             
-            // Fetch comments if needed
-            // Construct comments URL: usually url + "/comments"
-            // But let's check if we can get it from somewhere else or just append.
-            // The GitHub API consistency: issues/123 -> issues/123/comments
-            // PRs are issues in terms of comments mostly.
+            // 5. Fetch comments from GitHub API
             let commentsUrl = url + "/comments"
+            print("🔄 Fetching comments from: \(commentsUrl)")
             let comments = try await GitHubService.shared.fetchComments(commentsUrl: commentsUrl)
             commentsCache[url] = comments
+            print("✓ Fetched \(comments.count) comments")
+            
+            // 6. Clear loading state
+            loadingDetails.remove(url)
+            
+            print("✅ Successfully loaded details and comments for: \(notification.subject.title)")
             
         } catch {
-            print("Failed to fetch details for \(url): \(error)")
-            failedDetails[url] = error.localizedDescription
+            print("❌ Failed to fetch details for \(url): \(error)")
+            if let serviceError = error as? GitHubService.ServiceError {
+                failedDetails[url] = serviceError.errorDescription ?? "Unknown error"
+            } else {
+                failedDetails[url] = error.localizedDescription
+            }
+            loadingDetails.remove(url)
         }
-        loadingDetails.remove(url)
     }
     
     func toggleRepoFilter(_ repo: String) {

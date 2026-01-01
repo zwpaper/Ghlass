@@ -77,6 +77,22 @@ struct SidebarView: View {
             }
         }
         .frame(width: 250)
-        .background(.ultraThinMaterial)
+        .background(
+            ZStack {
+                // Base layer
+                Color(nsColor: .windowBackgroundColor)
+                    .opacity(0.3)
+                
+                // Gradient overlay
+                LinearGradient(
+                    colors: [
+                        Color.blue.opacity(0.05),
+                        Color.purple.opacity(0.05)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+        )
     }
 }

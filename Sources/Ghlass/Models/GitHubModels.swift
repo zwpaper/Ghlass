@@ -90,22 +90,32 @@ enum NotificationReason: String, CaseIterable, Identifiable {
 // MARK: - Detailed Models
 
 struct GitHubResourceDetail: Codable, Hashable {
+    let id: Int
+    let number: Int
+    let title: String
     let state: String // "open", "closed"
     let merged: Bool? // Only for PRs
     let body: String?
     let user: GitHubOwner
+    let assignees: [GitHubOwner]?
     let htmlUrl: String
     let comments: Int
+    let updatedAt: Date
     
     var isMerged: Bool { merged == true }
     
     enum CodingKeys: String, CodingKey {
+        case id
+        case number
+        case title
         case state
         case merged
         case body
         case user
+        case assignees
         case htmlUrl = "html_url"
         case comments
+        case updatedAt = "updated_at"
     }
 }
 

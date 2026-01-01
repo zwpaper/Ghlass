@@ -1,5 +1,50 @@
 import SwiftUI
 
+struct EmptyDetailView: View {
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "tray")
+                .font(.system(size: 64))
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [.blue, .purple],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            
+            Text("Select a notification")
+                .font(.title2)
+                .fontWeight(.medium)
+                .foregroundColor(.primary)
+            
+            Text("Choose a notification from the list to view details")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            ZStack {
+                // Base layer
+                Color(nsColor: .windowBackgroundColor)
+                    .opacity(0.5)
+                
+                // Subtle grey gradient
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.03),
+                        Color.gray.opacity(0.02)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+            }
+        )
+    }
+}
+
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // When running as a SwiftPM executable (not an .app bundle), macOS may
@@ -56,12 +101,8 @@ struct ContentView: View {
             if let selectedId = viewModel.selectedNotificationId ?? viewModel.selectedNotificationIds.first,
                let notification = viewModel.notifications.first(where: { $0.id == selectedId }) {
                 NotificationDetailView(notification: notification, viewModel: viewModel)
-                    .liquidBackground()
             } else {
-                Text("Select a notification")
-                    .font(.title)
-                    .foregroundColor(.secondary)
-                    .liquidBackground()
+                EmptyDetailView()
             }
         }
         .toolbar {

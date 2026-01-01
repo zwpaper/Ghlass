@@ -1,8 +1,9 @@
 import SwiftUI
+import AppKit
 
 struct NotificationListView: View {
     @ObservedObject var viewModel: AppViewModel
-    
+
     var body: some View {
         VStack {
             if viewModel.isLoading && viewModel.notifications.isEmpty {
@@ -24,23 +25,66 @@ struct NotificationListView: View {
                             .tag(notification.id)
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
+                            .contentShape(RoundedRectangle(cornerRadius: 12))
                             .padding(.vertical, 4)
+                            .transition(.asymmetric(
+                                insertion: .opacity.combined(with: .scale(scale: 0.9)),
+                                removal: .opacity.combined(with: .scale(scale: 0.9))
+                            ))
+
                             // Add an onTapGesture to handle single selection logic for the "last read" state
                             .onTapGesture {
-                                if viewModel.selectedNotificationIds.contains(notification.id) {
-                                    viewModel.selectedNotificationId = notification.id
-                                } else {
-                                    // If tap gesture fires but selection hasn't updated yet (sometimes happens in List),
-                                    // we might need to rely on the selection binding update or handle it here.
-                                    // But typically List handles selection.
-                                    // We can just set the "last viewed" here to be safe.
-                                    viewModel.selectedNotificationId = notification.id
+                                withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                                    if viewModel.selectedNotificationIds.contains(notification.id) {
+                                        viewModel.selectedNotificationId = notification.id
+                                    } else {
+                                        // If tap gesture fires but selection hasn't updated yet (sometimes happens in List),
+                                        // we might need to rely on the selection binding update or handle it here.
+                                        // But typically List handles selection.
+                                        // We can just set the "last viewed" here to be safe.
+                                        viewModel.selectedNotificationId = notification.id
+                                    }
                                 }
                             }
                     }
                 }
+                // When selection changes, mark as read and fetch details
+                .onChange(of: viewModel.selectedNotificationId) { newId in
+                    if let id = newId,
+                       let notification = viewModel.notifications.first(where: { $0.id == id }) {
+                        // Mark as read immediately when selected
+                        Task {
+                            await viewModel.markAsRead(id: id)
+                        }
+                        // Fetch details and comments from GitHub API
+                        Task {
+                            await viewModel.fetchDetail(for: notification)
+                        }
+                    }
+                }
                 .scrollContentBackground(.hidden)
+                .background(
+                    ZStack {
+                        ListSelectionConfigurator()
+                            .allowsHitTesting(false)
+
+                        // Layered background
+                        Color(nsColor: .windowBackgroundColor)
+                            .opacity(0.4)
+
+                        LinearGradient(
+                            colors: [
+                                Color.cyan.opacity(0.04),
+                                Color.blue.opacity(0.04)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    }
+                )
                 .frame(minWidth: 400)
+                .animation(.spring(response: 0.6, dampingFraction: 0.8), value: viewModel.filteredNotifications)
+
             }
         }
         .toolbar {
@@ -54,7 +98,7 @@ struct NotificationListView: View {
                 }
                 .disabled(viewModel.selectedNotificationIds.isEmpty)
             }
-            
+
             ToolbarItem(placement: .automatic) {
                 Button(action: {
                     Task {
@@ -71,31 +115,35 @@ struct NotificationListView: View {
 struct NotificationRow: View {
     let notification: GitHubNotification
     @ObservedObject var viewModel: AppViewModel
-    
+
+    var isSelected: Bool {
+        viewModel.selectedNotificationId == notification.id
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             // Type Icon
             iconView
                 .font(.system(size: 20))
                 .frame(width: 30)
-            
+
             VStack(alignment: .leading, spacing: 4) {
                 Text(notification.repository.fullName)
                     .font(.caption)
                     .foregroundColor(.secondary)
-                
+
                 Text(notification.subject.title)
                     .font(.headline)
                     .foregroundColor(.primary)
                     .lineLimit(2)
-                
+
                 HStack {
                     Text(notification.updatedAt.formatted(date: .abbreviated, time: .shortened))
                         .font(.caption2)
                         .foregroundColor(.secondary)
-                    
+
                     Spacer()
-                    
+
                     if notification.unread {
                         Circle()
                             .fill(Color.blue)
@@ -103,7 +151,7 @@ struct NotificationRow: View {
                     }
                 }
             }
-            
+
             // Done/Archive Button
             Button(action: {
                 Task {
@@ -118,12 +166,17 @@ struct NotificationRow: View {
             .help("Mark as done (Archive)")
         }
         .padding()
+        .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
         .glassEffect(cornerRadius: 12, material: .thinMaterial)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1)
+        )
         .onAppear {
             // Optional: Prefetch details here if desired
         }
     }
-    
+
     @ViewBuilder
     var iconView: some View {
         if let url = notification.subject.url, let detail = viewModel.detailsCache[url] {
@@ -156,7 +209,7 @@ struct NotificationRow: View {
             fallbackIcon
         }
     }
-    
+
     var fallbackIcon: some View {
         Group {
             switch notification.subject.type {
@@ -180,5 +233,47 @@ struct NotificationRow: View {
                     .foregroundColor(.secondary)
             }
         }
+    }
+}
+
+private struct ListSelectionConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        view.isHidden = true
+        DispatchQueue.main.async {
+            Self.configureTableView(from: view)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            Self.configureTableView(from: nsView)
+        }
+    }
+
+    private static func configureTableView(from view: NSView) {
+        guard let tableView = locateTableView(startingFrom: view) else { return }
+        tableView.selectionHighlightStyle = .none
+        tableView.backgroundColor = .clear
+    }
+
+    private static func locateTableView(startingFrom view: NSView) -> NSTableView? {
+        var visited = Set<ObjectIdentifier>()
+        var queue: [NSView] = [view]
+        while !queue.isEmpty {
+            let candidate = queue.removeFirst()
+            let identifier = ObjectIdentifier(candidate)
+            if visited.contains(identifier) { continue }
+            visited.insert(identifier)
+            if let tableView = candidate as? NSTableView {
+                return tableView
+            }
+            queue.append(contentsOf: candidate.subviews)
+            if let superview = candidate.superview {
+                queue.append(superview)
+            }
+        }
+        return nil
     }
 }

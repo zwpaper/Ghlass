@@ -12,20 +12,38 @@ class GitHubService {
         set { defaults.set(newValue, forKey: tokenKey) }
     }
 
-    enum ServiceError: Error {
+    enum ServiceError: LocalizedError {
         case noToken
         case invalidURL
         case requestFailed(Error)
         case invalidResponse
+        case apiError(statusCode: Int)
         case decodingFailed(Error)
+        
+        var errorDescription: String? {
+            switch self {
+            case .noToken: return "No GitHub token found"
+            case .invalidURL: return "Invalid URL"
+            case .requestFailed(let error): return "Request failed: \(error.localizedDescription)"
+            case .invalidResponse: return "Invalid response from server"
+            case .apiError(let statusCode): return "GitHub API Error: \(statusCode)"
+            case .decodingFailed(let error): return "Decoding failed: \(error.localizedDescription)"
+            }
+        }
     }
 
-    func fetchNotifications() async throws -> [GitHubNotification] {
+    func fetchNotifications(since: Date? = nil) async throws -> [GitHubNotification] {
         guard let token = token, !token.isEmpty else {
             throw ServiceError.noToken
         }
 
-        guard let url = URL(string: "https://api.github.com/notifications?all=true") else {
+        var urlString = "https://api.github.com/notifications?all=true"
+        if let since = since {
+            let formatter = ISO8601DateFormatter()
+            urlString += "&since=\(formatter.string(from: since))"
+        }
+
+        guard let url = URL(string: urlString) else {
             throw ServiceError.invalidURL
         }
 
@@ -41,8 +59,12 @@ class GitHubService {
             print("Fetching notifications status: \(httpResponse.statusCode)")
         }
 
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+        guard let httpResponse = response as? HTTPURLResponse else {
             throw ServiceError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw ServiceError.apiError(statusCode: httpResponse.statusCode)
         }
 
         let decoder = JSONDecoder()
@@ -75,9 +97,12 @@ class GitHubService {
             print("Marking notification \(notificationId) as done. Status code: \(httpResponse.statusCode)")
         }
 
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 204 else {
-            // 204 No Content is the expected response for success
+        guard let httpResponse = response as? HTTPURLResponse else {
             throw ServiceError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 204 else {
+            throw ServiceError.apiError(statusCode: httpResponse.statusCode)
         }
     }
 
@@ -97,9 +122,12 @@ class GitHubService {
 
         let (_, response) = try await session.data(for: request)
 
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 205 else {
-            // 205 Reset Content is the expected response for success
+        guard let httpResponse = response as? HTTPURLResponse else {
             throw ServiceError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 205 else {
+            throw ServiceError.apiError(statusCode: httpResponse.statusCode)
         }
     }
 
@@ -132,8 +160,16 @@ class GitHubService {
 
         let (data, response) = try await session.data(for: request)
 
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+        guard let httpResponse = response as? HTTPURLResponse else {
             throw ServiceError.invalidResponse
+        }
+
+        if httpResponse.statusCode != 200 {
+            print("Request failed for \(url). Status: \(httpResponse.statusCode)")
+            if let body = String(data: data, encoding: .utf8) {
+                print("Response body: \(body)")
+            }
+            throw ServiceError.apiError(statusCode: httpResponse.statusCode)
         }
 
         let decoder = JSONDecoder()
@@ -151,13 +187,6 @@ class GitHubService {
             throw ServiceError.noToken
         }
 
-        // The comments URL might be part of the resource detail or constructed
-        // Usually issues/PRs have a "comments_url" field, but for now we might construct it or use what we have
-        // If the passed URL is the issue URL, we append /comments
-        // However, the correct way is usually to get it from the detail.
-        // For simplicity, let's assume we pass the full comments URL or handle the logic elsewhere.
-        // Actually, let's assume the caller passes the correct API URL for comments.
-
         guard let url = URL(string: commentsUrl) else {
             throw ServiceError.invalidURL
         }
@@ -169,8 +198,12 @@ class GitHubService {
 
         let (data, response) = try await session.data(for: request)
 
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+        guard let httpResponse = response as? HTTPURLResponse else {
             throw ServiceError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw ServiceError.apiError(statusCode: httpResponse.statusCode)
         }
 
         let decoder = JSONDecoder()

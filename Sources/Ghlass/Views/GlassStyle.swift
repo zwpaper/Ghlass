@@ -4,15 +4,27 @@ struct GlassModifier: ViewModifier {
     var cornerRadius: CGFloat = 16
     var material: Material = .ultraThinMaterial
     var shadowRadius: CGFloat = 5
+    var borderOpacity: Double = 0.2
     
     func body(content: Content) -> some View {
         content
             .background(material)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-            .shadow(color: Color.black.opacity(0.1), radius: shadowRadius, x: 0, y: 2)
+            .shadow(color: Color.black.opacity(0.05), radius: shadowRadius, x: 0, y: 2)
+            .shadow(color: Color.white.opacity(0.1), radius: 1, x: 0, y: 1)
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius)
-                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(borderOpacity),
+                                Color.white.opacity(borderOpacity * 0.5)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
             )
     }
 }
