@@ -6,6 +6,7 @@ class AppViewModel: ObservableObject {
     @Published var notifications: [GitHubNotification] = []
     @Published var selectedNotificationIds: Set<String> = []
     @Published var selectedNotificationId: String? = nil // For 3-column selection
+    @Published var lastReadNotificationId: String? = nil // To keep the currently viewed notification visible
     
     @Published var isLoading = false
     @Published var errorMessage: String? = nil
@@ -14,6 +15,7 @@ class AppViewModel: ObservableObject {
     @Published var detailsCache: [String: GitHubResourceDetail] = [:]
     @Published var commentsCache: [String: [GitHubComment]] = [:]
     @Published var loadingDetails: Set<String> = []
+    @Published var failedDetails: [String: String] = [:] // URL -> Error message
     
     // Filters
     @Published var selectedRepos: Set<String> = []
@@ -52,7 +54,13 @@ class AppViewModel: ObservableObject {
             
             // Unread Filter
             if showUnreadOnly && !notification.unread {
-                return false
+                // Keep the currently selected/viewed notification visible even if read
+                let isSelected = (selectedNotificationId == notification.id) || selectedNotificationIds.contains(notification.id)
+                let isLastRead = (lastReadNotificationId == notification.id)
+                
+                if !isSelected && !isLastRead {
+                    return false
+                }
             }
             
             // Open State Filter (requires detail to be loaded to be accurate, or we assume open if unknown?)
@@ -67,6 +75,7 @@ class AppViewModel: ObservableObject {
             
             return true
         }
+        .sorted { $0.updatedAt > $1.updatedAt }
     }
     
     func fetchNotifications() async {
@@ -74,10 +83,9 @@ class AppViewModel: ObservableObject {
         errorMessage = nil
         do {
             let fetched = try await GitHubService.shared.fetchNotifications()
-            self.notifications = fetched
-            
-            // Pre-fetch details for visible notifications if needed, or do it on appear of rows
-            // For now, let's just fetch notifications.
+            self.notifications = fetched.filter { 
+                DatabaseService.shared.shouldShowNotification(notificationId: $0.id, currentUpdatedAt: $0.updatedAt)
+            }
         } catch {
             self.errorMessage = "Failed to fetch notifications: \(error.localizedDescription)"
         }
@@ -90,7 +98,13 @@ class AppViewModel: ObservableObject {
     }
     
     func markAsDone(ids: [String]) async {
-        // Optimistic update: remove from list immediately
+        // Save state to DB
+        let itemsToMark = notifications.filter { ids.contains($0.id) }
+        for item in itemsToMark {
+            DatabaseService.shared.markNotificationAsDone(notificationId: item.id, updatedAt: item.updatedAt)
+        }
+
+        // Optimistic update: always remove from list as requested
         notifications.removeAll { ids.contains($0.id) }
         
         // Clear selection if needed
@@ -112,13 +126,49 @@ class AppViewModel: ObservableObject {
     
     func fetchDetail(for notification: GitHubNotification) async {
         guard let url = notification.subject.url else { return }
-        if detailsCache[url] != nil { return }
+        
+        if detailsCache[url] != nil {
+            if notification.unread {
+                Task {
+                    try? await GitHubService.shared.markAsRead(notificationId: notification.id)
+                    await MainActor.run {
+                        // Set lastReadNotificationId BEFORE modifying the notification to ensure
+                        // the filter logic sees it as "last read" during the update cycle.
+                        self.lastReadNotificationId = notification.id
+                        
+                        if let index = self.notifications.firstIndex(where: { $0.id == notification.id }) {
+                            self.notifications[index] = self.notifications[index].markedAsRead()
+                        }
+                    }
+                }
+            }
+            return
+        }
+        
         if loadingDetails.contains(url) { return }
+        
+        // Clear any previous failure for this URL
+        failedDetails.removeValue(forKey: url)
         
         loadingDetails.insert(url)
         do {
             let detail = try await GitHubService.shared.fetchResourceDetail(url: url)
             detailsCache[url] = detail
+            
+            if notification.unread {
+                Task {
+                    try? await GitHubService.shared.markAsRead(notificationId: notification.id)
+                    await MainActor.run {
+                        // Set lastReadNotificationId BEFORE modifying the notification to ensure
+                        // the filter logic sees it as "last read" during the update cycle.
+                        self.lastReadNotificationId = notification.id
+                        
+                        if let index = self.notifications.firstIndex(where: { $0.id == notification.id }) {
+                            self.notifications[index] = self.notifications[index].markedAsRead()
+                        }
+                    }
+                }
+            }
             
             // Fetch comments if needed
             // Construct comments URL: usually url + "/comments"
@@ -131,6 +181,7 @@ class AppViewModel: ObservableObject {
             
         } catch {
             print("Failed to fetch details for \(url): \(error)")
+            failedDetails[url] = error.localizedDescription
         }
         loadingDetails.remove(url)
     }

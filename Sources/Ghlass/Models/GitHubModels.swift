@@ -23,6 +23,18 @@ struct GitHubNotification: Identifiable, Codable, Hashable {
         case updatedAt = "updated_at"
         case url
     }
+    
+    func markedAsRead() -> GitHubNotification {
+        return GitHubNotification(
+            id: id,
+            repository: repository,
+            subject: subject,
+            reason: reason,
+            unread: false,
+            updatedAt: updatedAt,
+            url: url
+        )
+    }
 }
 
 struct GitHubRepository: Codable, Hashable, Identifiable {

@@ -76,6 +76,39 @@ struct NotificationDetailView: View {
                         ProgressView()
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.top, 50)
+                    } else if let errorMessage = viewModel.failedDetails[url] {
+                        VStack(spacing: 12) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.largeTitle)
+                                .foregroundColor(.yellow)
+                            
+                            Text("Failed to load details")
+                                .font(.headline)
+                            
+                            Text(errorMessage)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                            
+                            Button(action: {
+                                Task {
+                                    await viewModel.fetchDetail(for: notification)
+                                }
+                            }) {
+                                HStack {
+                                    Image(systemName: "arrow.clockwise")
+                                    Text("Retry")
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(Color.blue.opacity(0.2))
+                                .foregroundColor(.blue)
+                                .cornerRadius(8)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 50)
                     } else {
                         Text("Select to load details")
                             .onAppear {

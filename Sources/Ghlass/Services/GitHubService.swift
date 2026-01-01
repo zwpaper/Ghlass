@@ -33,6 +33,7 @@ class GitHubService {
         request.httpMethod = "GET"
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.addValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
 
         let (data, response) = try await session.data(for: request)
 
@@ -76,6 +77,28 @@ class GitHubService {
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 204 else {
             // 204 No Content is the expected response for success
+            throw ServiceError.invalidResponse
+        }
+    }
+
+    func markAsRead(notificationId: String) async throws {
+        guard let token = token, !token.isEmpty else {
+            throw ServiceError.noToken
+        }
+
+        guard let url = URL(string: "https://api.github.com/notifications/threads/\(notificationId)") else {
+            throw ServiceError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.addValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+
+        let (_, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 205 else {
+            // 205 Reset Content is the expected response for success
             throw ServiceError.invalidResponse
         }
     }

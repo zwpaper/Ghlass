@@ -25,6 +25,18 @@ struct NotificationListView: View {
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
                             .padding(.vertical, 4)
+                            // Add an onTapGesture to handle single selection logic for the "last read" state
+                            .onTapGesture {
+                                if viewModel.selectedNotificationIds.contains(notification.id) {
+                                    viewModel.selectedNotificationId = notification.id
+                                } else {
+                                    // If tap gesture fires but selection hasn't updated yet (sometimes happens in List),
+                                    // we might need to rely on the selection binding update or handle it here.
+                                    // But typically List handles selection.
+                                    // We can just set the "last viewed" here to be safe.
+                                    viewModel.selectedNotificationId = notification.id
+                                }
+                            }
                     }
                 }
                 .scrollContentBackground(.hidden)

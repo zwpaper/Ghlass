@@ -10,13 +10,15 @@ let package = Package(
         .executable(name: "Ghlass", targets: ["Ghlass"])
     ],
     dependencies: [
-        .package(url: "https://github.com/gonzalezreal/swift-markdown-ui", from: "2.0.0")
+        .package(url: "https://github.com/gonzalezreal/swift-markdown-ui", from: "2.0.0"),
+        .package(url: "https://github.com/stephencelis/SQLite.swift.git", from: "0.14.1")
     ],
     targets: [
         .executableTarget(
             name: "Ghlass",
             dependencies: [
-                .product(name: "MarkdownUI", package: "swift-markdown-ui")
+                .product(name: "MarkdownUI", package: "swift-markdown-ui"),
+                .product(name: "SQLite", package: "SQLite.swift")
             ],
             resources: [
                 .process("Resources")
