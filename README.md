@@ -43,5 +43,6 @@ To build the `.app` bundle and a `.dmg` file for distribution:
    <a href="https://app.getpochi.com">
       <img alt="Pochi AI Coding Assistant" width="120" src="https://github.com/TabbyML/pochi/blob/main/packages/vscode/assets/icons/logo128.png?raw=true">
    </a>
-   <p>Pochi is an AI agent designed for software development. It operates within your favorite IDE, VSCode, using a toolkit of commands to execute complex tasks, from code generation to project-wide refactoring.</p>
+   <h4><a href="https://app.getpochi.com">Pochi is an AI agent designed for software development.</a></h4>
+   <p>It operates within your favorite IDE, VSCode, using a toolkit of commands to execute complex tasks, from code generation to project-wide refactoring.</p>
 </div>
