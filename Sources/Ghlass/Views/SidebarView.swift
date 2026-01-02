@@ -13,13 +13,31 @@ struct SidebarView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 15) {
                     // Unread Filter
-                    Toggle("Unread Only", isOn: $viewModel.showUnreadOnly)
-                        .padding(.horizontal)
+                    HStack {
+                        Image(systemName: viewModel.showUnreadOnly ? "checkmark.square.fill" : "square")
+                            .foregroundColor(viewModel.showUnreadOnly ? .blue : .secondary)
+                        Text("Unread Only")
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        viewModel.showUnreadOnly.toggle()
+                    }
+                    .padding(.horizontal)
                     
                     // Open Only Filter
-                    Toggle("Open Only", isOn: $viewModel.showOpenOnly)
-                        .padding(.horizontal)
-                        .help("Only show notifications for Open issues/PRs (requires details loaded)")
+                    HStack {
+                        Image(systemName: viewModel.showOpenOnly ? "checkmark.square.fill" : "square")
+                            .foregroundColor(viewModel.showOpenOnly ? .blue : .secondary)
+                        Text("Open Only")
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        viewModel.showOpenOnly.toggle()
+                    }
+                    .padding(.horizontal)
+                    .help("Only show notifications for Open issues/PRs (requires details loaded)")
                     
                     Divider()
                         .background(Color.white.opacity(0.2))
