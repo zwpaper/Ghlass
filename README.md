@@ -1,8 +1,8 @@
 # Ghlass
 
-<img src="icon.png" width="128" align="right" />
+<img src="docs/icon.png" width="128" align="right" />
 
-**Ghlass** (formerly Project GitHub Glass) is a macOS application built with SwiftUI that brings a beautiful "Liquid Glass" design to your GitHub notifications.
+**Ghlass** (named from GitHub Glass) is a macOS application built with SwiftUI that brings a beautiful "Liquid Glass" design to your GitHub notifications.
 
 ## Features
 
