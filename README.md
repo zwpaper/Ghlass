@@ -22,7 +22,13 @@
     ```bash
     swift run
     ```
-3.  Enter your GitHub Personal Access Token (PAT) with `notifications` scope in the settings.
+3.  Create a GitHub Personal Access Token (PAT) with the following scopes:
+    *   `notifications` - Required to read and manage your GitHub notifications
+    *   `repo` - Required to access issue and pull request details
+
+    **[Click here to create a token with these permissions pre-selected](https://github.com/settings/tokens/new?description=Ghlass%20App&scopes=notifications,repo)**
+
+4.  Enter your GitHub Personal Access Token in the Ghlass settings.
 
 ## Building for Release
 
