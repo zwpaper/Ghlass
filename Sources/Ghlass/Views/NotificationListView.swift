@@ -166,8 +166,8 @@ struct NotificationRow: View {
             .help("Mark as done (Archive)")
         }
         .padding()
-        .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
-        .glassEffect(cornerRadius: 12, material: .thinMaterial)
+        .background(isSelected ? Color.accentColor.opacity(0.1) : Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .glassEffect(cornerRadius: 12, material: .thickMaterial)
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1)
