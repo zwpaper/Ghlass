@@ -1,6 +1,20 @@
 # Ghlass
 
-<img src="docs/icon.png" width="128" align="right" />
+<div align="center">
+   <img src="docs/icon.png" width="256" />
+</div>
+
+<div align="center">
+   <sup>Design and Maintained with ❤️ + 🤖 by Pochi</sup>
+   <br>
+   <br>
+   <a href="https://app.getpochi.com">
+      <img alt="Pochi AI Coding Assistant" width="160" src="https://github.com/TabbyML/pochi/blob/main/packages/vscode/assets/icons/logo128.png?raw=true">
+   </a>
+
+### [Pochi is an AI agent designed for software development.](https://app.getpochi.com)
+[It operates within your IDE, using a toolkit of commands to write and refactor code autonomously across your entire project.](https://app.getpochi.com)<br>
+</div>
 
 **Ghlass** (named from GitHub Glass) is a macOS application built with SwiftUI that brings a beautiful "Liquid Glass" design to your GitHub notifications.
 
