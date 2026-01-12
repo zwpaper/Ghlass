@@ -124,6 +124,7 @@ struct GitHubResourceDetail: Codable, Hashable {
 struct GitHubComment: Codable, Hashable, Identifiable {
     let id: Int
     let body: String
+    let bodyHtml: String?
     let user: GitHubOwner
     let createdAt: Date
     let htmlUrl: String
@@ -131,6 +132,7 @@ struct GitHubComment: Codable, Hashable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id
         case body
+        case bodyHtml = "body_html"
         case user
         case createdAt = "created_at"
         case htmlUrl = "html_url"

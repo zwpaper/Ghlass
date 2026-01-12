@@ -276,6 +276,7 @@ struct NotificationDetailView: View {
 }
 struct CommentView: View {
     let comment: GitHubComment
+    @State private var webViewHeight: CGFloat = .zero
     
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -328,17 +329,22 @@ struct CommentView: View {
             Divider()
                 .background(Color.white.opacity(0.1))
             
-            Markdown(comment.body)
-                .textSelection(.enabled)
-                .markdownTextStyle(\.text) {
-                    FontSize(13)
-                    ForegroundColor(.primary)
-                }
-                .markdownTextStyle(\.code) {
-                    FontFamilyVariant(.monospaced)
-                    FontSize(12)
-                    BackgroundColor(Color.white.opacity(0.05))
-                }
+            if let bodyHtml = comment.bodyHtml, !bodyHtml.isEmpty {
+                WebView(htmlContent: bodyHtml, dynamicHeight: $webViewHeight)
+                    .frame(height: webViewHeight > 0 ? webViewHeight : 50)
+            } else {
+                Markdown(comment.body)
+                    .textSelection(.enabled)
+                    .markdownTextStyle(\.text) {
+                        FontSize(13)
+                        ForegroundColor(.primary)
+                    }
+                    .markdownTextStyle(\.code) {
+                        FontFamilyVariant(.monospaced)
+                        FontSize(12)
+                        BackgroundColor(Color.white.opacity(0.05))
+                    }
+            }
         }
         .padding(14)
         .background(
