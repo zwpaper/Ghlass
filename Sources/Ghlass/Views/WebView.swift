@@ -6,8 +6,14 @@ struct WebView: NSViewRepresentable {
     let htmlContent: String
     @Binding var dynamicHeight: CGFloat
     
+    class NonScrollingWebView: WKWebView {
+        override func scrollWheel(with event: NSEvent) {
+            nextResponder?.scrollWheel(with: event)
+        }
+    }
+
     func makeNSView(context: Context) -> WKWebView {
-        let webView = WKWebView()
+        let webView = NonScrollingWebView()
         webView.setValue(false, forKey: "drawsBackground")
         webView.navigationDelegate = context.coordinator
         return webView
@@ -17,22 +23,23 @@ struct WebView: NSViewRepresentable {
         let css = """
         <style>
         :root {
-            color-scheme: dark;
+            color-scheme: light dark;
         }
         body {
             font-family: -apple-system, system-ui, sans-serif;
             font-size: 13px;
             line-height: 1.5;
-            color: #c9d1d9;
+            color: -apple-system-label;
             margin: 0;
             padding: 0;
             overflow-wrap: break-word;
+            overflow: hidden;
         }
-        a { color: #58a6ff; text-decoration: none; }
+        a { color: -apple-system-blue; text-decoration: none; }
         a:hover { text-decoration: underline; }
         img { max-width: 100%; height: auto; }
         pre {
-            background-color: #161b22;
+            background-color: -apple-system-tertiary-system-fill;
             padding: 12px;
             border-radius: 6px;
             overflow-x: auto;
@@ -41,7 +48,7 @@ struct WebView: NSViewRepresentable {
         code {
             font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace;
             font-size: 12px;
-            background-color: rgba(110,118,129,0.4);
+            background-color: -apple-system-quaternary-system-fill;
             padding: 0.2em 0.4em;
             border-radius: 6px;
         }
@@ -50,8 +57,8 @@ struct WebView: NSViewRepresentable {
             padding: 0;
         }
         blockquote {
-            border-left: 0.25em solid #30363d;
-            color: #8b949e;
+            border-left: 0.25em solid -apple-system-separator;
+            color: -apple-system-secondary-label;
             padding: 0 1em;
             margin-left: 0;
         }
@@ -63,10 +70,10 @@ struct WebView: NSViewRepresentable {
         }
         td, th {
             padding: 6px 13px;
-            border: 1px solid #30363d;
+            border: 1px solid -apple-system-separator;
         }
         tr:nth-child(2n) {
-            background-color: #161b22;
+            background-color: -apple-system-quaternary-system-fill;
         }
         </style>
         """

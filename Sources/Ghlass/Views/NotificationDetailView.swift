@@ -116,8 +116,8 @@ struct NotificationDetailView: View {
                             }
                             .padding(20)
                         }
-                        .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
-                        .glassEffect(cornerRadius: 16, material: .thickMaterial)
+                        .background(Color.white.opacity(0.05))
+                        .glassEffect(cornerRadius: 16, material: .ultraThinMaterial)
                         
                         // Comments Section (Grouped)
                         if viewModel.loadingDetails.contains(url) {
@@ -130,8 +130,8 @@ struct NotificationDetailView: View {
                             }
                             .frame(maxWidth: .infinity)
                             .padding(20)
-                            .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
-                            .glassEffect(cornerRadius: 16, material: .thickMaterial)
+                            .background(Color.white.opacity(0.05))
+                            .glassEffect(cornerRadius: 16, material: .ultraThinMaterial)
                         } else if let comments = viewModel.commentsCache[url] {
                             if !comments.isEmpty {
                                 VStack(alignment: .leading, spacing: 0) {
@@ -164,8 +164,8 @@ struct NotificationDetailView: View {
                                     }
                                     .padding(16)
                                 }
-                                .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
-                                .glassEffect(cornerRadius: 16, material: .thickMaterial)
+                                .background(Color.white.opacity(0.05))
+                                .glassEffect(cornerRadius: 16, material: .ultraThinMaterial)
                             } else {
                                 HStack {
                                     Image(systemName: "bubble.left")
@@ -176,8 +176,8 @@ struct NotificationDetailView: View {
                                 }
                                 .frame(maxWidth: .infinity)
                                 .padding(20)
-                                .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
-                                .glassEffect(cornerRadius: 16, material: .thickMaterial)
+                                .background(Color.white.opacity(0.05))
+                                .glassEffect(cornerRadius: 16, material: .ultraThinMaterial)
                             }
                         }
                     } else if viewModel.loadingDetails.contains(url) {
@@ -189,8 +189,8 @@ struct NotificationDetailView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(50)
-                        .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
-                        .glassEffect(cornerRadius: 16, material: .thickMaterial)
+                        .background(Color.white.opacity(0.05))
+                        .glassEffect(cornerRadius: 16, material: .ultraThinMaterial)
                     } else if let errorMessage = viewModel.failedDetails[url] {
                         VStack(spacing: 16) {
                             Image(systemName: "exclamationmark.triangle.fill")
@@ -222,14 +222,14 @@ struct NotificationDetailView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(40)
-                        .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
-                        .glassEffect(cornerRadius: 16, material: .thickMaterial)
+                        .background(Color.white.opacity(0.05))
+                        .glassEffect(cornerRadius: 16, material: .ultraThinMaterial)
                     } else {
                         ProgressView("Loading...")
                             .frame(maxWidth: .infinity)
                             .padding(50)
-                            .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
-                            .glassEffect(cornerRadius: 16, material: .thickMaterial)
+                            .background(Color.white.opacity(0.05))
+                            .glassEffect(cornerRadius: 16, material: .ultraThinMaterial)
                     }
                 } else {
                     VStack(spacing: 12) {
@@ -242,8 +242,8 @@ struct NotificationDetailView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(50)
-                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
-                    .glassEffect(cornerRadius: 16, material: .thickMaterial)
+                    .background(Color.white.opacity(0.05))
+                    .glassEffect(cornerRadius: 16, material: .ultraThinMaterial)
                 }
             }
             .padding(24)
