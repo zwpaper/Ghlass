@@ -45,9 +45,9 @@ if [ -d "$RESOURCE_BUNDLE" ]; then
     cp -r "$RESOURCE_BUNDLE" "$APP_BUNDLE/Contents/Resources/"
 fi
 
-# Sign the app (Ad-hoc signing)
+# Sign the app (Ad-hoc signing with entitlements)
 echo "Signing App..."
-codesign --force --deep --sign - "$APP_BUNDLE"
+codesign --force --deep --sign - --entitlements Ghlass.entitlements "$APP_BUNDLE"
 
 # Prepare DMG Staging
 echo "Preparing DMG Staging..."
