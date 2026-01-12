@@ -123,9 +123,17 @@ struct NotificationRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             // Type Icon
-            iconView
-                .font(.system(size: 20))
-                .frame(width: 30)
+            VStack(spacing: 6) {
+                iconView
+                    .font(.system(size: 20))
+                    .frame(width: 30)
+
+                if notification.unread {
+                    Circle()
+                        .fill(Color.blue)
+                        .frame(width: 8, height: 8)
+                }
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(notification.repository.fullName)
@@ -137,18 +145,31 @@ struct NotificationRow: View {
                     .foregroundColor(.primary)
                     .lineLimit(2)
 
+                // Labels
+                if let url = notification.subject.url, let detail = viewModel.detailsCache[url], let labels = detail.labels, !labels.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 4) {
+                            ForEach(labels) {
+ label in
+                                Text(label.name)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(label.colorObject)
+                                    .foregroundColor(label.color.isLightColor() ? .black : .white)
+                                    .clipShape(Capsule())
+                            }
+                        }
+                    }
+                    .frame(height: 20)
+                }
+
                 HStack {
+                    Spacer()
+
                     Text(notification.updatedAt.formatted(date: .abbreviated, time: .shortened))
                         .font(.caption2)
                         .foregroundColor(.secondary)
-
-                    Spacer()
-
-                    if notification.unread {
-                        Circle()
-                            .fill(Color.blue)
-                            .frame(width: 8, height: 8)
-                    }
                 }
             }
 
@@ -183,13 +204,13 @@ struct NotificationRow: View {
             // We have details, show state-specific icon
             if notification.subject.type == "PullRequest" {
                 if detail.isMerged {
-                    Image(systemName: "arrow.triangle.merge")
+                    Image(systemName: "arrow.left.to.line.circle")
                         .foregroundColor(.purple)
                 } else if detail.state == "closed" {
-                    Image(systemName: "arrow.triangle.pull")
+                    Image(systemName: "shuffle.circle")
                         .foregroundColor(.red)
                 } else {
-                    Image(systemName: "arrow.triangle.branch")
+                    Image(systemName: "arrow.left.to.line.circle")
                         .foregroundColor(.green)
                 }
             } else if notification.subject.type == "Issue" {
@@ -217,7 +238,7 @@ struct NotificationRow: View {
                 Image(systemName: "dot.circle")
                     .foregroundColor(.green)
             case "PullRequest":
-                Image(systemName: "arrow.triangle.branch")
+                Image(systemName: "arrow.left.to.line.circle")
                     .foregroundColor(.blue)
             case "Release":
                 Image(systemName: "tag")
@@ -226,7 +247,7 @@ struct NotificationRow: View {
                 Image(systemName: "bubble.left.and.bubble.right")
                     .foregroundColor(.blue)
             case "Commit":
-                Image(systemName: "arrow.triangle.branch")
+                Image(systemName: "slider.vertical.3")
                     .foregroundColor(.gray)
             default:
                 Image(systemName: "bell")

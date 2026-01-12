@@ -38,6 +38,7 @@ class DatabaseService {
     private let ip_title = Expression<String>("title")
     private let ip_assignees = Expression<String?>("assignees") // JSON
     private let ip_author = Expression<String?>("author") // JSON
+    private let ip_labels = Expression<String?>("labels") // JSON
     private let ip_updated_at = Expression<Date>("updated_at")
     private let ip_last_synced_at = Expression<Date>("last_synced_at")
 
@@ -94,9 +95,13 @@ class DatabaseService {
                 t.column(ip_title)
                 t.column(ip_assignees)
                 t.column(ip_author)
+                t.column(ip_labels)
                 t.column(ip_updated_at)
                 t.column(ip_last_synced_at)
             })
+            
+            // Migration: Add labels column if it doesn't exist
+             try? db.run(issuePrTable.addColumn(ip_labels))
         } catch {
             print("Failed to create tables: \(error)")
         }
@@ -312,6 +317,7 @@ class DatabaseService {
         do {
             let assigneesJson = jsonString(issue.assignees)
             let authorJson = jsonString(issue.user)
+            let labelsJson = jsonString(issue.labels)
 
             // If merged, save state as "merged" to persist that info, since schema doesn't have separate merged column
             let stateToSave = (issue.isMerged) ? "merged" : issue.state
@@ -325,6 +331,7 @@ class DatabaseService {
                 ip_title <- issue.title,
                 ip_assignees <- assigneesJson,
                 ip_author <- authorJson,
+                ip_labels <- labelsJson,
                 ip_updated_at <- issue.updatedAt,
                 ip_last_synced_at <- Date()
             )
@@ -349,6 +356,7 @@ class DatabaseService {
 
                 let user = try? JSONDecoder().decode(GitHubOwner.self, from: Data((row[ip_author] ?? "{}").utf8))
                 let assignees = try? JSONDecoder().decode([GitHubOwner].self, from: Data((row[ip_assignees] ?? "[]").utf8))
+                let labels = try? JSONDecoder().decode([GitHubLabel].self, from: Data((row[ip_labels] ?? "[]").utf8))
 
                 let isMerged = (state == "merged")
                 // Map "merged" back to "closed" for the struct, but set merged=true
@@ -373,6 +381,7 @@ class DatabaseService {
                     bodyHtml: nil,
                     user: user ?? GitHubOwner(login: "unknown", avatarUrl: ""),
                     assignees: assignees,
+                    labels: labels,
                     htmlUrl: htmlUrl,
                     comments: 0,
                     updatedAt: updatedAt

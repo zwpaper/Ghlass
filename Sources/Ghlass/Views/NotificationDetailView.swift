@@ -402,7 +402,10 @@ struct StateBadge: View {
     }
     
     var statusIcon: String {
-        if type == "PullRequest" && isMerged { return "arrow.triangle.merge" }
+        if type == "PullRequest" && isMerged { return "arrow.left.to.line.circle" }
+        if type == "PullRequest" && state == "closed" { return "shuffle.circle" }
+        if type == "PullRequest" && state == "open" { return "arrow.left.to.line.circle" }
+        
         switch state {
         case "open": return "circle"
         case "closed": return "checkmark.circle.fill"

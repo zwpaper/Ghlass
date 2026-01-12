@@ -61,6 +61,13 @@ struct GitHubOwner: Codable, Hashable {
     }
 }
 
+struct GitHubLabel: Codable, Hashable, Identifiable {
+    let id: Int
+    let name: String
+    let color: String
+    let description: String?
+}
+
 struct NotificationSubject: Codable, Hashable {
     let title: String
     let type: String
@@ -99,6 +106,7 @@ struct GitHubResourceDetail: Codable, Hashable {
     let bodyHtml: String?
     let user: GitHubOwner
     let assignees: [GitHubOwner]?
+    let labels: [GitHubLabel]?
     let htmlUrl: String
     let comments: Int
     let updatedAt: Date
@@ -115,6 +123,7 @@ struct GitHubResourceDetail: Codable, Hashable {
         case bodyHtml = "body_html"
         case user
         case assignees
+        case labels
         case htmlUrl = "html_url"
         case comments
         case updatedAt = "updated_at"
