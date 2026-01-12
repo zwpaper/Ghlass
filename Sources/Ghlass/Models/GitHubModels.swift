@@ -96,6 +96,7 @@ struct GitHubResourceDetail: Codable, Hashable {
     let state: String // "open", "closed"
     let merged: Bool? // Only for PRs
     let body: String?
+    let bodyHtml: String?
     let user: GitHubOwner
     let assignees: [GitHubOwner]?
     let htmlUrl: String
@@ -111,6 +112,7 @@ struct GitHubResourceDetail: Codable, Hashable {
         case state
         case merged
         case body
+        case bodyHtml = "body_html"
         case user
         case assignees
         case htmlUrl = "html_url"

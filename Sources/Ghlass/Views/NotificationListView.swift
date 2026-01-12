@@ -49,7 +49,7 @@ struct NotificationListView: View {
                     }
                 }
                 // When selection changes, mark as read and fetch details
-                .onChange(of: viewModel.selectedNotificationId) { newId in
+                .onChange(of: viewModel.selectedNotificationId) { _, newId in
                     if let id = newId,
                        let notification = viewModel.notifications.first(where: { $0.id == id }) {
                         // Mark as read immediately when selected

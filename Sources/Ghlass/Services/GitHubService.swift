@@ -156,7 +156,7 @@ class GitHubService {
         var request = URLRequest(url: urlObj)
         request.httpMethod = "GET"
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.addValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.addValue("application/vnd.github.html+json", forHTTPHeaderField: "Accept")
 
         let (data, response) = try await session.data(for: request)
 

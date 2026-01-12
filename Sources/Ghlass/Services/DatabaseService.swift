@@ -83,7 +83,7 @@ class DatabaseService {
             })
 
             // Migration: Add is_read column if it doesn't exist
-            try? db.run(localNotificationStateTable.addColumn(lns_is_read, defaultValue: false))
+            // try? db.run(localNotificationStateTable.addColumn(lns_is_read, defaultValue: false))
 
             try db.run(issuePrTable.create(ifNotExists: true) { t in
                 t.column(ip_id, primaryKey: true)
@@ -262,7 +262,7 @@ class DatabaseService {
         do {
             // Check if record exists to preserve other flags (like is_done, though if it's done it's likely read)
             // For simplicity in this "upsert" logic:
-            let insert = localNotificationStateTable.insert(or: .replace,
+            _ = localNotificationStateTable.insert(or: .replace,
                 lns_thread_id <- threadId,
                 lns_is_read <- true,
                 // We should be careful not to reset is_done if it was done.
@@ -370,6 +370,7 @@ class DatabaseService {
                     state: structState,
                     merged: isMerged,
                     body: nil,
+                    bodyHtml: nil,
                     user: user ?? GitHubOwner(login: "unknown", avatarUrl: ""),
                     assignees: assignees,
                     htmlUrl: htmlUrl,

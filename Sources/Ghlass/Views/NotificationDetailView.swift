@@ -4,6 +4,7 @@ import MarkdownUI
 struct NotificationDetailView: View {
     let notification: GitHubNotification
     @ObservedObject var viewModel: AppViewModel
+    @State private var webViewHeight: CGFloat = .zero
     
     var body: some View {
         ScrollView {
@@ -87,7 +88,13 @@ struct NotificationDetailView: View {
                                     .buttonStyle(.plain)
                                 }
                                 
-                                if let body = detail.body, !body.isEmpty {
+                                if let bodyHtml = detail.bodyHtml, !bodyHtml.isEmpty {
+                                    Divider()
+                                        .background(Color.white.opacity(0.1))
+                                    
+                                    WebView(htmlContent: bodyHtml, dynamicHeight: $webViewHeight)
+                                        .frame(height: webViewHeight > 0 ? webViewHeight : 100)
+                                } else if let body = detail.body, !body.isEmpty {
                                     Divider()
                                         .background(Color.white.opacity(0.1))
                                     
