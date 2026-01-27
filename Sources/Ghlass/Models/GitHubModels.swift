@@ -109,7 +109,12 @@ struct GitHubResourceDetail: Codable, Hashable {
     let labels: [GitHubLabel]?
     let htmlUrl: String
     let comments: Int
+    let reviewComments: Int?
     let updatedAt: Date
+    let mergedBy: GitHubOwner?
+    let mergedAt: Date?
+    let additions: Int?
+    let deletions: Int?
     
     var isMerged: Bool { merged == true }
     
@@ -126,17 +131,24 @@ struct GitHubResourceDetail: Codable, Hashable {
         case labels
         case htmlUrl = "html_url"
         case comments
+        case reviewComments = "review_comments"
         case updatedAt = "updated_at"
+        case mergedBy = "merged_by"
+        case mergedAt = "merged_at"
+        case additions
+        case deletions
     }
 }
 
 struct GitHubComment: Codable, Hashable, Identifiable {
     let id: Int
-    let body: String
+    let body: String?
     let bodyHtml: String?
     let user: GitHubOwner
     let createdAt: Date
     let htmlUrl: String
+    let diffHunk: String?
+    let path: String?
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -145,5 +157,7 @@ struct GitHubComment: Codable, Hashable, Identifiable {
         case user
         case createdAt = "created_at"
         case htmlUrl = "html_url"
+        case diffHunk = "diff_hunk"
+        case path
     }
 }

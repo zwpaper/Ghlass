@@ -5,7 +5,7 @@ import AppKit
 struct WebView: NSViewRepresentable {
     let htmlContent: String
     @Binding var dynamicHeight: CGFloat
-    
+
     class NonScrollingWebView: WKWebView {
         override func scrollWheel(with event: NSEvent) {
             nextResponder?.scrollWheel(with: event)
@@ -18,7 +18,7 @@ struct WebView: NSViewRepresentable {
         webView.navigationDelegate = context.coordinator
         return webView
     }
-    
+
     func updateNSView(_ nsView: WKWebView, context: Context) {
         let css = """
         <style>
@@ -37,7 +37,15 @@ struct WebView: NSViewRepresentable {
         }
         a { color: -apple-system-blue; text-decoration: none; }
         a:hover { text-decoration: underline; }
-        img { max-width: 100%; height: auto; }
+        img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }
+        @media (min-width: 600px) {
+            img { max-width: 50%; }
+        }
         pre {
             background-color: -apple-system-tertiary-system-fill;
             padding: 12px;
@@ -77,32 +85,57 @@ struct WebView: NSViewRepresentable {
         }
         </style>
         """
-        
-        let html = css + htmlContent
+
+        let html = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+        \(css)
+        </head>
+        <body>
+        \(htmlContent)
+        </body>
+        </html>
+        """
+
         nsView.loadHTMLString(html, baseURL: nil)
     }
-    
+
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
-    
+
     class Coordinator: NSObject, WKNavigationDelegate {
         var parent: WebView
-        
+
         init(_ parent: WebView) {
             self.parent = parent
         }
-        
+
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            webView.evaluateJavaScript("document.body.scrollHeight") { (result, error) in
+            // Use a slightly more robust way to get height, and add a small buffer
+            let script = """
+                Math.max(
+                    document.body.scrollHeight,
+                    document.body.offsetHeight,
+                    document.documentElement.clientHeight,
+                    document.documentElement.scrollHeight,
+                    document.documentElement.offsetHeight
+                ) + 10;
+            """
+
+            webView.evaluateJavaScript(script) { (result, error) in
                 if let height = result as? CGFloat {
                     DispatchQueue.main.async {
-                        self.parent.dynamicHeight = height
+                        // Only update if the height is different to avoid loops, though SwiftUI handles this well
+                        if self.parent.dynamicHeight != height {
+                            self.parent.dynamicHeight = height
+                        }
                     }
                 }
             }
         }
-        
+
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             if navigationAction.navigationType == .linkActivated {
                 if let url = navigationAction.request.url {

@@ -39,6 +39,10 @@ class DatabaseService {
     private let ip_assignees = Expression<String?>("assignees") // JSON
     private let ip_author = Expression<String?>("author") // JSON
     private let ip_labels = Expression<String?>("labels") // JSON
+    private let ip_comments = Expression<Int>("comments")
+    private let ip_review_comments = Expression<Int?>("review_comments")
+    private let ip_merged_by = Expression<String?>("merged_by") // JSON
+    private let ip_merged_at = Expression<Date?>("merged_at")
     private let ip_updated_at = Expression<Date>("updated_at")
     private let ip_last_synced_at = Expression<Date>("last_synced_at")
 
@@ -96,12 +100,20 @@ class DatabaseService {
                 t.column(ip_assignees)
                 t.column(ip_author)
                 t.column(ip_labels)
+                t.column(ip_comments, defaultValue: 0)
+                t.column(ip_review_comments)
+                t.column(ip_merged_by)
+                t.column(ip_merged_at)
                 t.column(ip_updated_at)
                 t.column(ip_last_synced_at)
             })
             
             // Migration: Add labels column if it doesn't exist
              try? db.run(issuePrTable.addColumn(ip_labels))
+             try? db.run(issuePrTable.addColumn(ip_comments, defaultValue: 0))
+             try? db.run(issuePrTable.addColumn(ip_review_comments))
+             try? db.run(issuePrTable.addColumn(ip_merged_by))
+             try? db.run(issuePrTable.addColumn(ip_merged_at))
         } catch {
             print("Failed to create tables: \(error)")
         }
@@ -318,6 +330,7 @@ class DatabaseService {
             let assigneesJson = jsonString(issue.assignees)
             let authorJson = jsonString(issue.user)
             let labelsJson = jsonString(issue.labels)
+            let mergedByJson = jsonString(issue.mergedBy)
 
             // If merged, save state as "merged" to persist that info, since schema doesn't have separate merged column
             let stateToSave = (issue.isMerged) ? "merged" : issue.state
@@ -332,6 +345,10 @@ class DatabaseService {
                 ip_assignees <- assigneesJson,
                 ip_author <- authorJson,
                 ip_labels <- labelsJson,
+                ip_comments <- issue.comments,
+                ip_review_comments <- issue.reviewComments,
+                ip_merged_by <- mergedByJson,
+                ip_merged_at <- issue.mergedAt,
                 ip_updated_at <- issue.updatedAt,
                 ip_last_synced_at <- Date()
             )
@@ -357,6 +374,10 @@ class DatabaseService {
                 let user = try? JSONDecoder().decode(GitHubOwner.self, from: Data((row[ip_author] ?? "{}").utf8))
                 let assignees = try? JSONDecoder().decode([GitHubOwner].self, from: Data((row[ip_assignees] ?? "[]").utf8))
                 let labels = try? JSONDecoder().decode([GitHubLabel].self, from: Data((row[ip_labels] ?? "[]").utf8))
+                let mergedBy = try? JSONDecoder().decode(GitHubOwner.self, from: Data((row[ip_merged_by] ?? "{}").utf8))
+                let comments = row[ip_comments]
+                let reviewComments = row[ip_review_comments]
+                let mergedAt = row[ip_merged_at]
 
                 let isMerged = (state == "merged")
                 // Map "merged" back to "closed" for the struct, but set merged=true
@@ -383,8 +404,13 @@ class DatabaseService {
                     assignees: assignees,
                     labels: labels,
                     htmlUrl: htmlUrl,
-                    comments: 0,
-                    updatedAt: updatedAt
+                    comments: comments,
+                    reviewComments: reviewComments,
+                    updatedAt: updatedAt,
+                    mergedBy: mergedBy,
+                    mergedAt: mergedAt,
+                    additions: nil,
+                    deletions: nil
                 )
 
                 results[url] = detail

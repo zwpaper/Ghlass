@@ -43,6 +43,16 @@ extension View {
             }
         )
     }
+
+    func bubbleEffect(cornerRadius: CGFloat = 16, isSelected: Bool = false) -> some View {
+        self
+            .background(isSelected ? Color.accentColor.opacity(0.1) : Color.white.opacity(0.1))
+            .glassEffect(cornerRadius: cornerRadius, material: .ultraThinMaterial)
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1)
+            )
+    }
 }
 
 struct VisualEffectView: NSViewRepresentable {

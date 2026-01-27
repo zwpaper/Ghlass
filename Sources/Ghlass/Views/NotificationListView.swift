@@ -173,18 +173,34 @@ struct NotificationRow: View {
                 }
             }
 
-            // Done/Archive Button
-            Button(action: {
-                Task {
-                    await viewModel.markAsDone(ids: [notification.id])
+            // Done/Archive Button & Comment Count
+            VStack(spacing: 4) {
+                Button(action: {
+                    Task {
+                        await viewModel.markAsDone(ids: [notification.id])
+                    }
+                }) {
+                    Image(systemName: "archivebox")
+                        .foregroundColor(.secondary)
+                        .padding(4)
                 }
-            }) {
-                Image(systemName: "archivebox")
-                    .foregroundColor(.secondary)
-                    .padding(4)
+                .buttonStyle(PlainButtonStyle())
+                .help("Mark as done (Archive)")
+                
+                if let url = notification.subject.url,
+                   let detail = viewModel.detailsCache[url] {
+                    let totalComments = detail.comments + (detail.reviewComments ?? 0)
+                    if totalComments > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "bubble.left")
+                                .font(.system(size: 10))
+                            Text("\(totalComments)")
+                                .font(.system(size: 10))
+                        }
+                        .foregroundColor(.secondary)
+                    }
+                }
             }
-            .buttonStyle(PlainButtonStyle())
-            .help("Mark as done (Archive)")
         }
         .padding()
         .background(isSelected ? Color.accentColor.opacity(0.1) : Color(nsColor: .controlBackgroundColor).opacity(0.5))
