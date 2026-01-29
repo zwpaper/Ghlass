@@ -24,9 +24,14 @@ struct NotificationDetailView: View {
     let notification: GitHubNotification
     @ObservedObject var viewModel: AppViewModel
     @State private var webViewHeight: CGFloat = .zero
+    @State private var isWebViewLoading = true
+
+    // Track notification changes to reset state
+    @State private var lastNotificationId: String = ""
 
     var body: some View {
         ZStack(alignment: .top) {
+
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     // Spacer for sticky header
@@ -74,9 +79,28 @@ struct NotificationDetailView: View {
                                         Divider()
                                             .background(Color.white.opacity(0.1))
 
-                                        WebView(htmlContent: bodyHtml, dynamicHeight: $webViewHeight)
-                                            .frame(height: webViewHeight > 0 ? webViewHeight : 100)
+                                        ZStack {
+                                            WebView(htmlContent: bodyHtml, dynamicHeight: $webViewHeight, isLoading: $isWebViewLoading)
+                                                .frame(height: webViewHeight > 0 ? webViewHeight : 100)
+                                                .opacity(isWebViewLoading ? 0 : 1)
+                                            
+                                            if isWebViewLoading {
+                                                VStack(alignment: .leading, spacing: 8) {
+                                                    ForEach(0..<3) { _ in
+                                                        RoundedRectangle(cornerRadius: 4)
+                                                            .fill(Color.gray.opacity(0.2))
+                                                            .frame(height: 14)
+                                                            .frame(maxWidth: .infinity)
+                                                    }
+                                                    RoundedRectangle(cornerRadius: 4)
+                                                        .fill(Color.gray.opacity(0.2))
+                                                        .frame(width: 200, height: 14)
+                                                }
+                                                .shimmer()
+                                            }
+                                        }
                                     } else if let body = detail.body, !body.isEmpty {
+
                                         Divider()
                                             .background(Color.white.opacity(0.1))
 
@@ -101,8 +125,46 @@ struct NotificationDetailView: View {
                             .bubbleEffect(cornerRadius: 16)
 
                             // Comments Section (Ungrouped)
+                        
+                        // Check if we have comments OR if it's merged (since merged event is a timeline item)
+                        let timelineItems = getTimelineItems(url: url)
 
-                        if viewModel.loadingDetails.contains(url) {
+                        if !timelineItems.isEmpty {
+                            VStack(alignment: .leading, spacing: 16) {
+                                // Comments Header
+                                HStack {
+                                    Image(systemName: "bubble.left.and.bubble.right.fill")
+                                        .foregroundColor(.blue)
+                                        .font(.title3)
+                                    Text("Timeline")
+                                        .font(.title3)
+                                        .fontWeight(.semibold)
+                                    Text("(\(timelineItems.count))")
+                                        .font(.title3)
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                    
+                                    if viewModel.loadingDetails.contains(url) {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                            .scaleEffect(0.8)
+                                    }
+                                }
+                                .padding(.horizontal, 4)
+
+                                // Timeline List
+                                LazyVStack(alignment: .leading, spacing: 16) {
+                                    ForEach(timelineItems) { item in
+                                        switch item {
+                                        case .comment(let comment):
+                                            CommentView(comment: comment)
+                                        case .merged(let user, let date):
+                                            MergedEventView(user: user, date: date)
+                                        }
+                                    }
+                                }
+                            }
+                        } else if viewModel.loadingDetails.contains(url) {
                             HStack(spacing: 12) {
                                 ProgressView()
                                     .controlSize(.small)
@@ -113,62 +175,20 @@ struct NotificationDetailView: View {
                             .frame(maxWidth: .infinity)
                             .padding(20)
                             .bubbleEffect(cornerRadius: 16)
-                        } else {
-                            // Check if we have comments OR if it's merged (since merged event is a timeline item)
-                            let timelineItems = getTimelineItems(url: url)
-
-                            if !timelineItems.isEmpty {
-                                VStack(alignment: .leading, spacing: 16) {
-                                    // Comments Header
-                                    HStack {
-                                        Image(systemName: "bubble.left.and.bubble.right.fill")
-                                            .foregroundColor(.blue)
-                                            .font(.title3)
-                                        Text("Timeline")
-                                            .font(.title3)
-                                            .fontWeight(.semibold)
-                                        Text("(\(timelineItems.count))")
-                                            .font(.title3)
-                                            .foregroundColor(.secondary)
-                                        Spacer()
-                                    }
-                                    .padding(.horizontal, 4)
-
-                                    // Timeline List
-                                    LazyVStack(alignment: .leading, spacing: 16) {
-                                        ForEach(timelineItems) { item in
-                                            switch item {
-                                            case .comment(let comment):
-                                                CommentView(comment: comment)
-                                            case .merged(let user, let date):
-                                                MergedEventView(user: user, date: date)
-                                            }
-                                        }
-                                    }
-                                }
-                            } else if viewModel.commentsCache[url] != nil { // Loaded but empty
-                                HStack {
-                                    Image(systemName: "bubble.left")
-                                        .foregroundColor(.secondary)
-                                    Text("No comments yet")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(20)
-                                .bubbleEffect(cornerRadius: 16)
+                        } else if viewModel.commentsCache[url] != nil { // Loaded but empty
+                            HStack {
+                                Image(systemName: "bubble.left")
+                                    .foregroundColor(.secondary)
+                                Text("No comments yet")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
                             }
+                            .frame(maxWidth: .infinity)
+                            .padding(20)
+                            .bubbleEffect(cornerRadius: 16)
                         }
                     } else if viewModel.loadingDetails.contains(url) {
-                        VStack(spacing: 16) {
-                            ProgressView()
-                            Text("Loading details...")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(50)
-                        .bubbleEffect(cornerRadius: 16)
+                        SkeletonDetailView()
                     } else if let errorMessage = viewModel.failedDetails[url] {
                         VStack(spacing: 16) {
                             Image(systemName: "exclamationmark.triangle.fill")
@@ -202,10 +222,7 @@ struct NotificationDetailView: View {
                         .padding(40)
                         .bubbleEffect(cornerRadius: 16)
                     } else {
-                        ProgressView("Loading...")
-                            .frame(maxWidth: .infinity)
-                            .padding(50)
-                            .bubbleEffect(cornerRadius: 16)
+                        SkeletonDetailView()
                     }
                 } else {
                     VStack(spacing: 12) {
@@ -250,6 +267,12 @@ struct NotificationDetailView: View {
             Task {
                 await viewModel.fetchDetail(for: notification)
             }
+        }
+        .onChange(of: notification.id) { oldValue, newValue in
+            // Reset WebView state when switching notifications to prevent flickering
+            webViewHeight = .zero
+            isWebViewLoading = true
+            lastNotificationId = newValue
         }
     }
     func getTimelineItems(url: String) -> [TimelineItem] {
@@ -330,8 +353,13 @@ struct MergedEventView: View {
 struct CommentView: View {
     let comment: GitHubComment
     @State private var webViewHeight: CGFloat = .zero
+    @State private var isWebViewLoading = true
+
+    // Track comment changes to reset state
+    @State private var lastCommentId: Int = 0
 
     var body: some View {
+
         HStack(alignment: .top, spacing: 12) {
             // Avatar on the left
             AsyncImage(url: URL(string: comment.user.avatarUrl)) { image in
@@ -369,6 +397,12 @@ struct CommentView: View {
         }
         .padding(16)
         .bubbleEffect(cornerRadius: 16)
+        .id(comment.id) // Ensure fresh state when comment changes
+        .onChange(of: comment.id) { _, _ in
+            // Reset WebView state when comment changes
+            webViewHeight = .zero
+            isWebViewLoading = true
+        }
     }
 
     private var headerView: some View {
@@ -458,9 +492,28 @@ struct CommentView: View {
     @ViewBuilder
     private var bodyView: some View {
         if let bodyHtml = comment.bodyHtml, !bodyHtml.isEmpty {
-            WebView(htmlContent: bodyHtml, dynamicHeight: $webViewHeight)
-                .frame(height: webViewHeight > 0 ? webViewHeight : 50)
+            ZStack {
+                WebView(htmlContent: bodyHtml, dynamicHeight: $webViewHeight, isLoading: $isWebViewLoading)
+                    .frame(height: webViewHeight > 0 ? webViewHeight : 50)
+                    .opacity(isWebViewLoading ? 0 : 1)
+                
+                if isWebViewLoading {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(0..<2) { _ in
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.gray.opacity(0.2))
+                                .frame(height: 12)
+                                .frame(maxWidth: .infinity)
+                        }
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.gray.opacity(0.2))
+                            .frame(width: 150, height: 12)
+                    }
+                    .shimmer()
+                }
+            }
         } else if let body = comment.body, !body.isEmpty {
+
             Markdown(body)
                 .textSelection(.enabled)
                 .markdownTextStyle(\.text) {
@@ -606,5 +659,81 @@ struct DetailHeaderView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
+    }
+}
+
+struct SkeletonDetailView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Header Skeleton
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(Color.gray.opacity(0.2))
+                        .frame(width: 40, height: 40)
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.gray.opacity(0.2))
+                            .frame(width: 100, height: 16)
+                        
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.gray.opacity(0.2))
+                            .frame(width: 150, height: 12)
+                    }
+                    Spacer()
+                }
+                
+                Divider()
+                    .background(Color.white.opacity(0.1))
+                
+                // Body Skeleton
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(0..<3) { _ in
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.gray.opacity(0.2))
+                            .frame(height: 14)
+                            .frame(maxWidth: .infinity)
+                    }
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.gray.opacity(0.2))
+                        .frame(width: 200, height: 14)
+                }
+                .padding(.top, 8)
+            }
+            .padding(20)
+            .bubbleEffect(cornerRadius: 16)
+            
+            // Comments Skeleton
+            ForEach(0..<2) { _ in
+                HStack(alignment: .top, spacing: 12) {
+                    Circle()
+                        .fill(Color.gray.opacity(0.2))
+                        .frame(width: 32, height: 32)
+                    
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack {
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.gray.opacity(0.2))
+                                .frame(width: 80, height: 14)
+                            Spacer()
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.gray.opacity(0.2))
+                                .frame(height: 12)
+                                .frame(maxWidth: .infinity)
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.gray.opacity(0.2))
+                                .frame(width: 150, height: 12)
+                        }
+                    }
+                }
+                .padding(16)
+                .bubbleEffect(cornerRadius: 16)
+            }
+        }
+        .shimmer()
     }
 }

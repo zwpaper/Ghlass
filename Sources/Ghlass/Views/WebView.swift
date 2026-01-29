@@ -5,6 +5,7 @@ import AppKit
 struct WebView: NSViewRepresentable {
     let htmlContent: String
     @Binding var dynamicHeight: CGFloat
+    var isLoading: Binding<Bool>? = nil
 
     class NonScrollingWebView: WKWebView {
         override func scrollWheel(with event: NSEvent) {
@@ -19,6 +20,7 @@ struct WebView: NSViewRepresentable {
         return webView
     }
 
+
     func updateNSView(_ nsView: WKWebView, context: Context) {
         let css = """
         <style>
@@ -31,7 +33,7 @@ struct WebView: NSViewRepresentable {
             line-height: 1.5;
             color: -apple-system-label;
             margin: 0;
-            padding: 0;
+            padding: 0 0 12px 0;
             overflow-wrap: break-word;
             overflow: hidden;
         }
@@ -83,6 +85,9 @@ struct WebView: NSViewRepresentable {
         tr:nth-child(2n) {
             background-color: -apple-system-quaternary-system-fill;
         }
+        body > :last-child {
+            margin-bottom: 0 !important;
+        }
         </style>
         """
 
@@ -93,7 +98,7 @@ struct WebView: NSViewRepresentable {
         \(css)
         </head>
         <body>
-        \(htmlContent)
+        \(htmlContent.trimmingCharacters(in: .whitespacesAndNewlines))
         </body>
         </html>
         """
@@ -113,15 +118,61 @@ struct WebView: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            // Use a slightly more robust way to get height, and add a small buffer
+            // Recursive function to remove trailing whitespace/br tags/empty elements
             let script = """
-                Math.max(
-                    document.body.scrollHeight,
-                    document.body.offsetHeight,
-                    document.documentElement.clientHeight,
-                    document.documentElement.scrollHeight,
-                    document.documentElement.offsetHeight
-                ) + 10;
+                (function() {
+                    function isVisuallyEmpty(node) {
+                        if (node.nodeType === 3) { // Text node
+                            return !node.textContent.trim();
+                        }
+                        if (node.nodeType === 1) { // Element
+                            if (node.tagName === 'BR') return true;
+                            if (node.tagName === 'IMG' || node.tagName === 'HR' || node.tagName === 'IFRAME' || node.tagName === 'VIDEO') return false;
+
+                            // Check children
+                            var hasContent = false;
+                            for (var i = 0; i < node.childNodes.length; i++) {
+                                if (!isVisuallyEmpty(node.childNodes[i])) {
+                                    hasContent = true;
+                                    break;
+                                }
+                            }
+                            return !hasContent;
+                        }
+                        return true;
+                    }
+
+                    function removeTrailingEmptyElements(element) {
+                        if (!element) return;
+                        var lastNode = element.lastChild;
+
+                        while (lastNode) {
+                            if (isVisuallyEmpty(lastNode)) {
+                                var toRemove = lastNode;
+                                lastNode = lastNode.previousSibling;
+                                toRemove.remove();
+                            } else {
+                                // If it's an element, try to clean its end
+                                if (lastNode.nodeType === 1) {
+                                    removeTrailingEmptyElements(lastNode);
+                                    // After cleaning inside, check if it became empty
+                                    if (isVisuallyEmpty(lastNode)) {
+                                        var toRemove = lastNode;
+                                        lastNode = lastNode.previousSibling;
+                                        toRemove.remove();
+                                        continue;
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+
+                    removeTrailingEmptyElements(document.body);
+
+                    // Return the height
+                    return document.body.scrollHeight;
+                })();
             """
 
             webView.evaluateJavaScript(script) { (result, error) in
@@ -131,10 +182,12 @@ struct WebView: NSViewRepresentable {
                         if self.parent.dynamicHeight != height {
                             self.parent.dynamicHeight = height
                         }
+                        self.parent.isLoading?.wrappedValue = false
                     }
                 }
             }
         }
+
 
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             if navigationAction.navigationType == .linkActivated {

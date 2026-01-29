@@ -72,3 +72,40 @@ struct VisualEffectView: NSViewRepresentable {
         visualEffectView.blendingMode = blendingMode
     }
 }
+
+struct ShimmerEffect: ViewModifier {
+    @State private var phase: CGFloat = 0
+    
+    func body(content: Content) -> some View {
+        content
+            .overlay(
+                GeometryReader { geometry in
+                    LinearGradient(
+                        gradient: Gradient(stops: [
+                            .init(color: .clear, location: 0),
+                            .init(color: .white.opacity(0.1), location: 0.3),
+                            .init(color: .white.opacity(0.2), location: 0.5),
+                            .init(color: .white.opacity(0.1), location: 0.7),
+                            .init(color: .clear, location: 1)
+                        ]),
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    .frame(width: geometry.size.width * 2, height: geometry.size.height * 2)
+                    .offset(x: -geometry.size.width + (phase * 2 * geometry.size.width), y: 0)
+                }
+            )
+            .mask(content)
+            .onAppear {
+                withAnimation(Animation.linear(duration: 2).repeatForever(autoreverses: false)) {
+                    phase = 1
+                }
+            }
+    }
+}
+
+extension View {
+    func shimmer() -> some View {
+        modifier(ShimmerEffect())
+    }
+}

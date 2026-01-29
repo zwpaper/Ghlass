@@ -98,12 +98,24 @@ struct ContentView: View {
             // For simplicity, we prioritize `selectedNotificationId` if set (single click),
             // or fallback to the first of `selectedNotificationIds`.
 
-            if let selectedId = viewModel.selectedNotificationId ?? viewModel.selectedNotificationIds.first,
-               let notification = viewModel.notifications.first(where: { $0.id == selectedId }) {
-                NotificationDetailView(notification: notification, viewModel: viewModel)
-            } else {
-                EmptyDetailView()
+            ZStack {
+                if let selectedId = viewModel.selectedNotificationId ?? viewModel.selectedNotificationIds.first,
+                   let notification = viewModel.notifications.first(where: { $0.id == selectedId }) {
+                    NotificationDetailView(notification: notification, viewModel: viewModel)
+                        .id(selectedId)
+                        .transition(.asymmetric(
+                            insertion: .opacity.animation(.easeInOut(duration: 0.15).delay(0.15)),
+                            removal: .opacity.animation(.easeInOut(duration: 0.15))
+                        ))
+                } else {
+                    EmptyDetailView()
+                        .transition(.asymmetric(
+                            insertion: .opacity.animation(.easeInOut(duration: 0.15).delay(0.15)),
+                            removal: .opacity.animation(.easeInOut(duration: 0.15))
+                        ))
+                }
             }
+            .animation(.easeInOut(duration: 0.3), value: viewModel.selectedNotificationId ?? viewModel.selectedNotificationIds.first)
         }
         .toolbar {
             ToolbarItem(placement: .navigation) {
