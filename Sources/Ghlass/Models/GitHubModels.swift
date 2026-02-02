@@ -161,3 +161,97 @@ struct GitHubComment: Codable, Hashable, Identifiable {
         case path
     }
 }
+
+struct GitHubCheckSuite: Codable, Hashable, Identifiable {
+    let id: Int
+    let status: String?
+    let conclusion: String?
+    let headBranch: String?
+    let headSha: String?
+    let checkRunsUrl: String
+    let app: GitHubApp?
+    let repository: GitHubRepository
+    let createdAt: Date?
+    let updatedAt: Date?
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case status
+        case conclusion
+        case headBranch = "head_branch"
+        case headSha = "head_sha"
+        case checkRunsUrl = "check_runs_url"
+        case app
+        case repository
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+struct GitHubCheckRun: Codable, Hashable, Identifiable {
+    let id: Int
+    let name: String
+    let status: String?
+    let conclusion: String?
+    let startedAt: Date?
+    let completedAt: Date?
+    let htmlUrl: String?
+    let detailsUrl: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case status
+        case conclusion
+        case startedAt = "started_at"
+        case completedAt = "completed_at"
+        case htmlUrl = "html_url"
+        case detailsUrl = "details_url"
+    }
+}
+
+struct GitHubApp: Codable, Hashable, Identifiable {
+    let id: Int
+    let slug: String?
+    let name: String
+    let owner: GitHubOwner
+}
+
+struct GitHubCheckSuiteDetail: Hashable {
+    let checkSuite: GitHubCheckSuite
+    let checkRuns: [GitHubCheckRun]
+    var workflowRun: GitHubWorkflowRun?
+}
+
+struct GitHubWorkflowRun: Codable, Hashable, Identifiable {
+    let id: Int
+    let name: String
+    let headBranch: String
+    let headSha: String
+    let status: String?
+    let conclusion: String?
+    let createdAt: Date
+    let updatedAt: Date
+    let htmlUrl: String
+    let runNumber: Int
+    let event: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case headBranch = "head_branch"
+        case headSha = "head_sha"
+        case status
+        case conclusion
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+        case htmlUrl = "html_url"
+        case runNumber = "run_number"
+        case event
+    }
+}
+
+struct GitHubWorkflowRunsResponse: Decodable {
+    let total_count: Int
+    let workflow_runs: [GitHubWorkflowRun]
+}

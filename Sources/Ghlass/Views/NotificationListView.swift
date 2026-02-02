@@ -19,46 +19,63 @@ struct NotificationListView: View {
                 }
             } else {
                 List(selection: $viewModel.selectedNotificationIds) {
-                    ForEach(viewModel.filteredNotifications) {
- notification in
-                        NotificationRow(notification: notification, viewModel: viewModel)
-                            .tag(notification.id)
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                            .contentShape(RoundedRectangle(cornerRadius: 12))
-                            .padding(.vertical, 4)
-                            .transition(.asymmetric(
-                                insertion: .opacity.combined(with: .scale(scale: 0.9)),
-                                removal: .opacity.combined(with: .scale(scale: 0.9))
-                            ))
-
-                            // Add an onTapGesture to handle single selection logic for the "last read" state
-                            .onTapGesture {
-                                withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
-                                    if viewModel.selectedNotificationIds.contains(notification.id) {
-                                        viewModel.selectedNotificationId = notification.id
-                                    } else {
-                                        // If tap gesture fires but selection hasn't updated yet (sometimes happens in List),
-                                        // we might need to rely on the selection binding update or handle it here.
-                                        // But typically List handles selection.
-                                        // We can just set the "last viewed" here to be safe.
-                                        viewModel.selectedNotificationId = notification.id
+                    ForEach(viewModel.displayItems) { item in
+                        switch item {
+                        case .notification(let notification):
+                            NotificationRow(notification: notification, viewModel: viewModel)
+                                .tag(notification.id)
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                                .contentShape(RoundedRectangle(cornerRadius: 12))
+                                .padding(.vertical, 4)
+                                .transition(.asymmetric(
+                                    insertion: .opacity.combined(with: .scale(scale: 0.9)),
+                                    removal: .opacity.combined(with: .scale(scale: 0.9))
+                                ))
+                                .onTapGesture {
+                                    withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                                        if viewModel.selectedNotificationIds.contains(notification.id) {
+                                            viewModel.selectedNotificationId = notification.id
+                                        } else {
+                                            viewModel.selectedNotificationId = notification.id
+                                        }
                                     }
                                 }
-                            }
+
+                        case .group(let title, let notifications):
+                            NotificationGroupRow(title: title, notifications: notifications, viewModel: viewModel)
+                                .tag(item.id)
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                                .contentShape(RoundedRectangle(cornerRadius: 12))
+                                .padding(.vertical, 4)
+                                .transition(.asymmetric(
+                                    insertion: .opacity.combined(with: .scale(scale: 0.9)),
+                                    removal: .opacity.combined(with: .scale(scale: 0.9))
+                                ))
+                                .onTapGesture {
+                                    withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                                        viewModel.selectedNotificationId = item.id
+                                    }
+                                }
+                        }
                     }
                 }
                 // When selection changes, mark as read and fetch details
                 .onChange(of: viewModel.selectedNotificationId) { _, newId in
-                    if let id = newId,
-                       let notification = viewModel.notifications.first(where: { $0.id == id }) {
-                        // Mark as read immediately when selected
-                        Task {
-                            await viewModel.markAsRead(id: id)
-                        }
-                        // Fetch details and comments from GitHub API
-                        Task {
-                            await viewModel.fetchDetail(for: notification)
+                    if let id = newId {
+                        if id.hasPrefix("group|") {
+                            // It's a group, we might want to mark all as read?
+                            // For now, let's just let the user view it.
+                        } else if let notification = viewModel.notifications.first(where: { $0.id == id }) {
+                            // Mark as read immediately when selected
+                            Task {
+                                await viewModel.markAsRead(id: id)
+                            }
+                            // Fetch details and comments from GitHub API
+                            Task {
+                                await viewModel.fetchDetail(for: notification)
+                            }
                         }
                     }
                 }
@@ -83,7 +100,7 @@ struct NotificationListView: View {
                     }
                 )
                 .frame(minWidth: 400)
-                .animation(.spring(response: 0.6, dampingFraction: 0.8), value: viewModel.filteredNotifications)
+                .animation(.spring(response: 0.6, dampingFraction: 0.8), value: viewModel.displayItems)
 
             }
         }
@@ -105,8 +122,16 @@ struct NotificationListView: View {
                         await viewModel.fetchNotifications()
                     }
                 }) {
-                    Label("Refresh", systemImage: "arrow.clockwise")
+                    if viewModel.isLoading {
+                        ProgressView()
+                            .controlSize(.small)
+                            .scaleEffect(0.7)
+                            .frame(width: 16, height: 16)
+                    } else {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
                 }
+                .disabled(viewModel.isLoading)
             }
         }
     }
@@ -186,7 +211,7 @@ struct NotificationRow: View {
                 }
                 .buttonStyle(PlainButtonStyle())
                 .help("Mark as done (Archive)")
-                
+
                 if let url = notification.subject.url,
                    let detail = viewModel.detailsCache[url] {
                     let totalComments = detail.comments + (detail.reviewComments ?? 0)
@@ -270,6 +295,85 @@ struct NotificationRow: View {
                     .foregroundColor(.secondary)
             }
         }
+    }
+}
+
+struct NotificationGroupRow: View {
+    let title: String
+    let notifications: [GitHubNotification]
+    @ObservedObject var viewModel: AppViewModel
+    
+    var isSelected: Bool {
+        let repo = notifications.first?.repository.fullName ?? ""
+        let groupId = "group|\(repo)|\(title)"
+        return viewModel.selectedNotificationId == groupId
+    }
+    
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            // Icon
+            VStack(spacing: 6) {
+                Image(systemName: "gearshape.2")
+                    .font(.system(size: 20))
+                    .frame(width: 30)
+                    .foregroundColor(.secondary)
+
+                // Unread dot if any in group is unread
+                if notifications.contains(where: { $0.unread }) {
+                    Circle()
+                        .fill(Color.blue)
+                        .frame(width: 8, height: 8)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                if let first = notifications.first {
+                    Text(first.repository.fullName)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Text(title)
+                    .font(.headline)
+                    .foregroundColor(.primary)
+                    .lineLimit(2)
+
+                Text("\(notifications.count) notifications")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+
+                HStack {
+                    Spacer()
+                    if let maxDate = notifications.map(\.updatedAt).max() {
+                        Text(maxDate.formatted(date: .abbreviated, time: .shortened))
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            // Archive Button
+            VStack(spacing: 4) {
+                Button(action: {
+                    Task {
+                        await viewModel.markAsDone(ids: notifications.map(\.id))
+                    }
+                }) {
+                    Image(systemName: "archivebox")
+                        .foregroundColor(.secondary)
+                        .padding(4)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help("Archive All")
+            }
+        }
+        .padding()
+        .background(isSelected ? Color.accentColor.opacity(0.1) : Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .glassEffect(cornerRadius: 12, material: .thickMaterial)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1)
+        )
     }
 }
 

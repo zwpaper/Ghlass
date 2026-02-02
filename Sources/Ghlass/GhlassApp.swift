@@ -99,14 +99,30 @@ struct ContentView: View {
             // or fallback to the first of `selectedNotificationIds`.
 
             ZStack {
-                if let selectedId = viewModel.selectedNotificationId ?? viewModel.selectedNotificationIds.first,
-                   let notification = viewModel.notifications.first(where: { $0.id == selectedId }) {
-                    NotificationDetailView(notification: notification, viewModel: viewModel)
-                        .id(selectedId)
-                        .transition(.asymmetric(
-                            insertion: .opacity.animation(.easeInOut(duration: 0.15).delay(0.15)),
-                            removal: .opacity.animation(.easeInOut(duration: 0.15))
-                        ))
+                if let selectedId = viewModel.selectedNotificationId ?? viewModel.selectedNotificationIds.first {
+                    // Check if it's a group
+                    if selectedId.hasPrefix("group|") {
+                        if let item = viewModel.displayItems.first(where: { $0.id == selectedId }),
+                           case .group(let title, let notifications) = item {
+                            CheckSuiteGroupDetailView(title: title, notifications: notifications, viewModel: viewModel)
+                                .id(selectedId)
+                                .transition(.asymmetric(
+                                    insertion: .opacity.animation(.easeInOut(duration: 0.15).delay(0.15)),
+                                    removal: .opacity.animation(.easeInOut(duration: 0.15))
+                                ))
+                        } else {
+                            EmptyDetailView()
+                        }
+                    } else if let notification = viewModel.notifications.first(where: { $0.id == selectedId }) {
+                        NotificationDetailView(notification: notification, viewModel: viewModel)
+                            .id(selectedId)
+                            .transition(.asymmetric(
+                                insertion: .opacity.animation(.easeInOut(duration: 0.15).delay(0.15)),
+                                removal: .opacity.animation(.easeInOut(duration: 0.15))
+                            ))
+                    } else {
+                        EmptyDetailView()
+                    }
                 } else {
                     EmptyDetailView()
                         .transition(.asymmetric(
@@ -122,6 +138,16 @@ struct ContentView: View {
                 Button(action: { showSettings = true }) {
                     Image(systemName: "gearshape")
                 }
+            }
+        }
+        .alert("Failed to fetch notifications", isPresented: Binding<Bool>(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            if let errorMessage = viewModel.errorMessage {
+                Text(errorMessage)
             }
         }
     }

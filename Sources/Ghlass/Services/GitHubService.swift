@@ -17,7 +17,7 @@ class GitHubService {
         case invalidURL
         case requestFailed(Error)
         case invalidResponse
-        case apiError(statusCode: Int)
+        case apiError(statusCode: Int, message: String)
         case decodingFailed(Error)
         
         var errorDescription: String? {
@@ -26,10 +26,18 @@ class GitHubService {
             case .invalidURL: return "Invalid URL"
             case .requestFailed(let error): return "Request failed: \(error.localizedDescription)"
             case .invalidResponse: return "Invalid response from server"
-            case .apiError(let statusCode): return "GitHub API Error: \(statusCode)"
+            case .apiError(let statusCode, let message): return "GitHub API Error \(statusCode): \(message)"
             case .decodingFailed(let error): return "Decoding failed: \(error.localizedDescription)"
             }
         }
+    }
+
+    private func extractErrorMessage(from data: Data) -> String {
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let message = json["message"] as? String {
+            return message
+        }
+        return String(data: data, encoding: .utf8) ?? "Unknown error"
     }
 
     func fetchNotifications(since: Date? = nil) async throws -> [GitHubNotification] {
@@ -64,7 +72,9 @@ class GitHubService {
         }
         
         guard httpResponse.statusCode == 200 else {
-            throw ServiceError.apiError(statusCode: httpResponse.statusCode)
+            let message = extractErrorMessage(from: data)
+            print("Fetch notifications failed: \(message)")
+            throw ServiceError.apiError(statusCode: httpResponse.statusCode, message: message)
         }
 
         let decoder = JSONDecoder()
@@ -91,7 +101,7 @@ class GitHubService {
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.addValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
 
-        let (_, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request)
 
         if let httpResponse = response as? HTTPURLResponse {
             print("Marking notification \(notificationId) as done. Status code: \(httpResponse.statusCode)")
@@ -102,7 +112,8 @@ class GitHubService {
         }
         
         guard httpResponse.statusCode == 204 else {
-            throw ServiceError.apiError(statusCode: httpResponse.statusCode)
+            let message = extractErrorMessage(from: data)
+            throw ServiceError.apiError(statusCode: httpResponse.statusCode, message: message)
         }
     }
 
@@ -120,14 +131,15 @@ class GitHubService {
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.addValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
 
-        let (_, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ServiceError.invalidResponse
         }
         
         guard httpResponse.statusCode == 205 else {
-            throw ServiceError.apiError(statusCode: httpResponse.statusCode)
+            let message = extractErrorMessage(from: data)
+            throw ServiceError.apiError(statusCode: httpResponse.statusCode, message: message)
         }
     }
 
@@ -166,10 +178,9 @@ class GitHubService {
 
         if httpResponse.statusCode != 200 {
             print("Request failed for \(url). Status: \(httpResponse.statusCode)")
-            if let body = String(data: data, encoding: .utf8) {
-                print("Response body: \(body)")
-            }
-            throw ServiceError.apiError(statusCode: httpResponse.statusCode)
+            let message = extractErrorMessage(from: data)
+            print("Response body: \(message)")
+            throw ServiceError.apiError(statusCode: httpResponse.statusCode, message: message)
         }
 
         let decoder = JSONDecoder()
@@ -202,7 +213,8 @@ class GitHubService {
         }
         
         guard httpResponse.statusCode == 200 else {
-            throw ServiceError.apiError(statusCode: httpResponse.statusCode)
+            let message = extractErrorMessage(from: data)
+            throw ServiceError.apiError(statusCode: httpResponse.statusCode, message: message)
         }
 
         let decoder = JSONDecoder()
@@ -210,6 +222,125 @@ class GitHubService {
 
         do {
             return try decoder.decode([GitHubComment].self, from: data)
+        } catch {
+            throw ServiceError.decodingFailed(error)
+        }
+    }
+    
+    func fetchCheckSuite(url: String) async throws -> GitHubCheckSuite {
+        guard let token = token, !token.isEmpty else {
+            throw ServiceError.noToken
+        }
+
+        guard let urlObj = URL(string: url) else {
+            throw ServiceError.invalidURL
+        }
+
+        var request = URLRequest(url: urlObj)
+        request.httpMethod = "GET"
+        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.addValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ServiceError.invalidResponse
+        }
+
+        if httpResponse.statusCode != 200 {
+            print("Request failed for \(url). Status: \(httpResponse.statusCode)")
+            let message = extractErrorMessage(from: data)
+            throw ServiceError.apiError(statusCode: httpResponse.statusCode, message: message)
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        do {
+            return try decoder.decode(GitHubCheckSuite.self, from: data)
+        } catch {
+            throw ServiceError.decodingFailed(error)
+        }
+    }
+    
+    func fetchCheckRuns(url: String) async throws -> [GitHubCheckRun] {
+        guard let token = token, !token.isEmpty else {
+            throw ServiceError.noToken
+        }
+
+        guard let urlObj = URL(string: url) else {
+            throw ServiceError.invalidURL
+        }
+
+        var request = URLRequest(url: urlObj)
+        request.httpMethod = "GET"
+        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.addValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ServiceError.invalidResponse
+        }
+
+        if httpResponse.statusCode != 200 {
+            print("Request failed for \(url). Status: \(httpResponse.statusCode)")
+            let message = extractErrorMessage(from: data)
+            throw ServiceError.apiError(statusCode: httpResponse.statusCode, message: message)
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        struct CheckRunsResponse: Decodable {
+            let check_runs: [GitHubCheckRun]
+        }
+        
+        do {
+            let response = try decoder.decode(CheckRunsResponse.self, from: data)
+            return response.check_runs
+        } catch {
+            throw ServiceError.decodingFailed(error)
+        }
+    }
+
+    func fetchWorkflowRuns(repoFullName: String, since: Date? = nil) async throws -> [GitHubWorkflowRun] {
+        guard let token = token, !token.isEmpty else {
+            throw ServiceError.noToken
+        }
+
+        var urlString = "https://api.github.com/repos/\(repoFullName)/actions/runs?per_page=100"
+        if let since = since {
+            let formatter = ISO8601DateFormatter()
+            urlString += "&created=>\(formatter.string(from: since))"
+        }
+
+        guard let url = URL(string: urlString) else {
+            throw ServiceError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.addValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ServiceError.invalidResponse
+        }
+
+        if httpResponse.statusCode != 200 {
+            let message = extractErrorMessage(from: data)
+            throw ServiceError.apiError(statusCode: httpResponse.statusCode, message: message)
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        do {
+            let result = try decoder.decode(GitHubWorkflowRunsResponse.self, from: data)
+            return result.workflow_runs
         } catch {
             throw ServiceError.decodingFailed(error)
         }

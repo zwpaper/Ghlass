@@ -38,8 +38,10 @@ struct NotificationDetailView: View {
                     Color.clear.frame(height: 60)
 
                     // Title & Body Section (Grouped)
-                    if let url = notification.subject.url {
-                        if let detail = viewModel.detailsCache[url] {
+                    if let url = notification.subject.url, !url.isEmpty {
+                        if notification.subject.type == "CheckSuite", let checkSuiteDetail = viewModel.checkSuiteCache[url] {
+                            CheckSuiteDetailView(detail: checkSuiteDetail, title: notification.subject.title)
+                        } else if let detail = viewModel.detailsCache[url] {
                             VStack(alignment: .leading, spacing: 0) {
                                 // Author & Description
                                 VStack(alignment: .leading, spacing: 16) {
@@ -83,7 +85,7 @@ struct NotificationDetailView: View {
                                             WebView(htmlContent: bodyHtml, dynamicHeight: $webViewHeight, isLoading: $isWebViewLoading)
                                                 .frame(height: webViewHeight > 0 ? webViewHeight : 100)
                                                 .opacity(isWebViewLoading ? 0 : 1)
-                                            
+
                                             if isWebViewLoading {
                                                 VStack(alignment: .leading, spacing: 8) {
                                                     ForEach(0..<3) { _ in
@@ -125,7 +127,7 @@ struct NotificationDetailView: View {
                             .bubbleEffect(cornerRadius: 16)
 
                             // Comments Section (Ungrouped)
-                        
+
                         // Check if we have comments OR if it's merged (since merged event is a timeline item)
                         let timelineItems = getTimelineItems(url: url)
 
@@ -143,7 +145,7 @@ struct NotificationDetailView: View {
                                         .font(.title3)
                                         .foregroundColor(.secondary)
                                     Spacer()
-                                    
+
                                     if viewModel.loadingDetails.contains(url) {
                                         ProgressView()
                                             .controlSize(.small)
@@ -419,15 +421,17 @@ struct CommentView: View {
 
             Spacer()
 
-            Link(destination: URL(string: comment.htmlUrl)!) {
-                Image(systemName: "link")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(6)
-                    .background(Color.white.opacity(0.05))
-                    .clipShape(Circle())
+            if let url = URL(string: comment.htmlUrl) {
+                Link(destination: url) {
+                    Image(systemName: "link")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(6)
+                        .background(Color.white.opacity(0.05))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
     }
 
@@ -496,7 +500,7 @@ struct CommentView: View {
                 WebView(htmlContent: bodyHtml, dynamicHeight: $webViewHeight, isLoading: $isWebViewLoading)
                     .frame(height: webViewHeight > 0 ? webViewHeight : 50)
                     .opacity(isWebViewLoading ? 0 : 1)
-                
+
                 if isWebViewLoading {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(0..<2) { _ in
@@ -607,6 +611,8 @@ struct DetailHeaderView: View {
                         .padding(.vertical, 8)
                         .bubbleEffect(cornerRadius: 20)
                     }
+                } else if let url = notification.subject.url, let checkSuiteDetail = viewModel.checkSuiteCache[url] {
+                     StatusBadge(status: checkSuiteDetail.checkSuite.status, conclusion: checkSuiteDetail.checkSuite.conclusion)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -643,8 +649,8 @@ struct DetailHeaderView: View {
                 .buttonStyle(.plain)
                 .help("Archive")
 
-                if let detail = detail {
-                    Link(destination: URL(string: detail.htmlUrl)!) {
+                if let detail = detail, let url = URL(string: detail.htmlUrl) {
+                    Link(destination: url) {
                         Image(systemName: "arrow.up.right")
                             .font(.body)
                             .foregroundColor(.secondary)
@@ -671,22 +677,22 @@ struct SkeletonDetailView: View {
                     Circle()
                         .fill(Color.gray.opacity(0.2))
                         .frame(width: 40, height: 40)
-                    
+
                     VStack(alignment: .leading, spacing: 4) {
                         RoundedRectangle(cornerRadius: 4)
                             .fill(Color.gray.opacity(0.2))
                             .frame(width: 100, height: 16)
-                        
+
                         RoundedRectangle(cornerRadius: 4)
                             .fill(Color.gray.opacity(0.2))
                             .frame(width: 150, height: 12)
                     }
                     Spacer()
                 }
-                
+
                 Divider()
                     .background(Color.white.opacity(0.1))
-                
+
                 // Body Skeleton
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(0..<3) { _ in
@@ -703,14 +709,14 @@ struct SkeletonDetailView: View {
             }
             .padding(20)
             .bubbleEffect(cornerRadius: 16)
-            
+
             // Comments Skeleton
             ForEach(0..<2) { _ in
                 HStack(alignment: .top, spacing: 12) {
                     Circle()
                         .fill(Color.gray.opacity(0.2))
                         .frame(width: 32, height: 32)
-                    
+
                     VStack(alignment: .leading, spacing: 14) {
                         HStack {
                             RoundedRectangle(cornerRadius: 4)
@@ -718,7 +724,7 @@ struct SkeletonDetailView: View {
                                 .frame(width: 80, height: 14)
                             Spacer()
                         }
-                        
+
                         VStack(alignment: .leading, spacing: 8) {
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(Color.gray.opacity(0.2))

@@ -14,6 +14,7 @@ class AppViewModel: ObservableObject {
     // Details Cache
     @Published var detailsCache: [String: GitHubResourceDetail] = [:]
     @Published var commentsCache: [String: [GitHubComment]] = [:]
+    @Published var checkSuiteCache: [String: GitHubCheckSuiteDetail] = [:]
     @Published var loadingDetails: Set<String> = []
     @Published var failedDetails: [String: String] = [:] // URL -> Error message
 
@@ -80,6 +81,61 @@ class AppViewModel: ObservableObject {
         .sorted { $0.updatedAt > $1.updatedAt }
     }
 
+    var displayItems: [NotificationDisplayItem] {
+        let filtered = filteredNotifications
+        var groups: [String: [GitHubNotification]] = [:] // Key: "repo|normalizedTitle"
+        var singles: [GitHubNotification] = []
+        
+        for notification in filtered {
+            if notification.subject.type == "CheckSuite" {
+                let normalizedTitle = normalizeCheckSuiteTitle(notification.subject.title)
+                let key = "\(notification.repository.fullName)|\(normalizedTitle)"
+                groups[key, default: []].append(notification)
+            } else {
+                singles.append(notification)
+            }
+        }
+        
+        var items: [NotificationDisplayItem] = []
+        
+        // Add singles
+        for n in singles {
+            items.append(.notification(n))
+        }
+        
+        // Add groups
+        for (key, notifs) in groups {
+            // Extract title from key
+            let title = String(key.split(separator: "|", maxSplits: 1).last ?? "")
+            items.append(.group(title: title, notifications: notifs))
+        }
+        
+        // Sort by updatedAt
+        return items.sorted { $0.updatedAt > $1.updatedAt }
+    }
+    
+    private func normalizeCheckSuiteTitle(_ title: String) -> String {
+        // Remove ", Attempt #N" or " Attempt #N"
+        // Example: "Pochi Integration test workflow run, Attempt #3 failed for main branch"
+        // Becomes: "Pochi Integration test workflow run failed for main branch"
+        
+        var normalized = title
+        
+        // Regex to match ", Attempt #\d+" or " Attempt #\d+"
+        // We use a simple replacement approach
+        // Note: NSRegularExpression is robust
+        
+        if let regex = try? NSRegularExpression(pattern: ",? Attempt #\\d+", options: .caseInsensitive) {
+            let range = NSRange(location: 0, length: normalized.utf16.count)
+            normalized = regex.stringByReplacingMatches(in: normalized, options: [], range: range, withTemplate: "")
+        }
+        
+        // Clean up double spaces if any created (though template is empty string, so "run, Attempt #3 failed" -> "run failed")
+        // If "run Attempt #3 failed" -> "run failed"
+        
+        return normalized.replacingOccurrences(of: "  ", with: " ")
+    }
+
     func fetchNotifications() async {
         isLoading = true
         errorMessage = nil
@@ -91,8 +147,11 @@ class AppViewModel: ObservableObject {
             let fetched = try await GitHubService.shared.fetchNotifications(since: lastSync)
 
             // 3. Upsert threads to DB and fetch details for Issues/PRs
+            var reposToSync: Set<String> = []
+            
             for notification in fetched {
                 DatabaseService.shared.upsertNotificationThread(notification)
+                reposToSync.insert(notification.repository.fullName)
 
                 // Fetch details if Issue or PR
                 if (notification.subject.type == "Issue" || notification.subject.type == "PullRequest"),
@@ -119,6 +178,9 @@ class AppViewModel: ObservableObject {
                     }
                 }
             }
+            
+            // Sync action runs for relevant repositories
+            await syncActionRuns(for: reposToSync)
 
             // 4. Load from DB to UI
             self.notifications = DatabaseService.shared.getAllNotificationThreads()
@@ -128,7 +190,7 @@ class AppViewModel: ObservableObject {
             self.detailsCache.merge(localDetails) { (_, new) in new }
 
         } catch {
-            self.errorMessage = "Failed to fetch notifications: \(error.localizedDescription)"
+            self.errorMessage = error.localizedDescription
             // Even if fetch fails, load from DB
             self.notifications = DatabaseService.shared.getAllNotificationThreads()
 
@@ -139,8 +201,27 @@ class AppViewModel: ObservableObject {
     }
 
     func markSelectedAsDone() async {
-        let idsToMark = selectedNotificationIds
+        let idsToMark = resolveNotificationIds(from: selectedNotificationIds)
         await markAsDone(ids: Array(idsToMark))
+    }
+    
+    func resolveNotificationIds(from ids: Set<String>) -> Set<String> {
+        var result = Set<String>()
+        // We need to look up in displayItems to find groups
+        let currentItems = displayItems
+        
+        for id in ids {
+            if id.hasPrefix("group|") {
+                // Find the group
+                if let item = currentItems.first(where: { $0.id == id }),
+                   case .group(_, let notifications) = item {
+                    result.formUnion(notifications.map(\.id))
+                }
+            } else {
+                result.insert(id)
+            }
+        }
+        return result
     }
 
     func markAsDone(ids: [String]) async {
@@ -191,8 +272,8 @@ class AppViewModel: ObservableObject {
 
     func fetchDetail(for notification: GitHubNotification) async {
         // Fetch latest details and comments from GitHub API when a notification is selected
-        guard let url = notification.subject.url else {
-            print("⚠️ No subject URL for notification: \(notification.subject.title)")
+        guard let url = notification.subject.url, !url.isEmpty else {
+            print("⚠️ No subject URL for notification: \(notification.subject.title) (ID: \(notification.id))")
             return
         }
 
@@ -211,55 +292,70 @@ class AppViewModel: ObservableObject {
         print("   URL: \(url)")
 
         do {
-            // 3. Fetch latest details from GitHub API
-            let detail = try await GitHubService.shared.fetchResourceDetail(url: url)
-            detailsCache[url] = detail
-            print("✓ Fetched detail - State: \(detail.state), Number: \(detail.number)")
-
-            // 4. Update DB if it's an Issue/PR
-            if (notification.subject.type == "Issue" || notification.subject.type == "PullRequest"),
-               let numberString = notification.subjectId, let number = Int(numberString) {
-                DatabaseService.shared.upsertIssuePr(
-                    issue: detail,
-                    repoFullName: notification.repository.fullName,
-                    number: number,
-                    type: notification.subject.type
+            if notification.subject.type == "CheckSuite" {
+                let checkSuite = try await GitHubService.shared.fetchCheckSuite(url: url)
+                let checkRuns = try await GitHubService.shared.fetchCheckRuns(url: checkSuite.checkRunsUrl)
+                
+                // Try to match with a workflow run
+                let matchedRun = await findMatchedWorkflowRun(notification: notification)
+                
+                checkSuiteCache[url] = GitHubCheckSuiteDetail(
+                    checkSuite: checkSuite,
+                    checkRuns: checkRuns,
+                    workflowRun: matchedRun
                 )
-                print("✓ Updated DB for \(notification.subject.type) #\(number)")
-            }
-
-            // 5. Fetch comments from GitHub API
-            var allComments: [GitHubComment] = []
-
-            if notification.subject.type == "PullRequest" {
-                // For PRs, we want both review comments (code) and issue comments (conversation)
-                let reviewCommentsUrl = url + "/comments"
-                // Construct Issue URL from Pull URL: .../pulls/123 -> .../issues/123
-                let issueCommentsUrl = url.replacingOccurrences(of: "/pulls/", with: "/issues/") + "/comments"
-
-                print("🔄 Fetching PR comments from: \(reviewCommentsUrl) and \(issueCommentsUrl)")
-
-                // Fetch in parallel
-                async let reviewCommentsTask = GitHubService.shared.fetchComments(commentsUrl: reviewCommentsUrl)
-                async let issueCommentsTask = GitHubService.shared.fetchComments(commentsUrl: issueCommentsUrl)
-
-                let reviews = try await reviewCommentsTask
-                let issues = try await issueCommentsTask
-                allComments = reviews + issues
+                print("✓ Fetched check suite details")
             } else {
-                let commentsUrl = url + "/comments"
-                print("🔄 Fetching comments from: \(commentsUrl)")
-                allComments = try await GitHubService.shared.fetchComments(commentsUrl: commentsUrl)
-            }
+                // 3. Fetch latest details from GitHub API
+                let detail = try await GitHubService.shared.fetchResourceDetail(url: url)
+                detailsCache[url] = detail
+                print("✓ Fetched detail - State: \(detail.state), Number: \(detail.number)")
 
-            allComments.sort { $0.createdAt < $1.createdAt }
-            commentsCache[url] = allComments
-            print("✓ Fetched \(allComments.count) comments")
+                // 4. Update DB if it's an Issue/PR
+                if (notification.subject.type == "Issue" || notification.subject.type == "PullRequest"),
+                   let numberString = notification.subjectId, let number = Int(numberString) {
+                    DatabaseService.shared.upsertIssuePr(
+                        issue: detail,
+                        repoFullName: notification.repository.fullName,
+                        number: number,
+                        type: notification.subject.type
+                    )
+                    print("✓ Updated DB for \(notification.subject.type) #\(number)")
+                }
+
+                // 5. Fetch comments from GitHub API
+                var allComments: [GitHubComment] = []
+
+                if notification.subject.type == "PullRequest" {
+                    // For PRs, we want both review comments (code) and issue comments (conversation)
+                    let reviewCommentsUrl = url + "/comments"
+                    // Construct Issue URL from Pull URL: .../pulls/123 -> .../issues/123
+                    let issueCommentsUrl = url.replacingOccurrences(of: "/pulls/", with: "/issues/") + "/comments"
+
+                    print("🔄 Fetching PR comments from: \(reviewCommentsUrl) and \(issueCommentsUrl)")
+
+                    // Fetch in parallel
+                    async let reviewCommentsTask = GitHubService.shared.fetchComments(commentsUrl: reviewCommentsUrl)
+                    async let issueCommentsTask = GitHubService.shared.fetchComments(commentsUrl: issueCommentsUrl)
+
+                    let reviews = try await reviewCommentsTask
+                    let issues = try await issueCommentsTask
+                    allComments = reviews + issues
+                } else {
+                    let commentsUrl = url + "/comments"
+                    print("🔄 Fetching comments from: \(commentsUrl)")
+                    allComments = try await GitHubService.shared.fetchComments(commentsUrl: commentsUrl)
+                }
+
+                allComments.sort { $0.createdAt < $1.createdAt }
+                commentsCache[url] = allComments
+                print("✓ Fetched \(allComments.count) comments")
+            }
 
             // 6. Clear loading state
             loadingDetails.remove(url)
 
-            print("✅ Successfully loaded details and comments for: \(notification.subject.title)")
+            print("✅ Successfully loaded details for: \(notification.subject.title)")
 
         } catch {
             print("❌ Failed to fetch details for \(url): \(error)")
@@ -285,6 +381,109 @@ class AppViewModel: ObservableObject {
             selectedTypes.remove(type)
         } else {
             selectedTypes.insert(type)
+        }
+    }
+    
+    // MARK: - Action Runs Support
+    
+    private func syncActionRuns(for repos: Set<String>) async {
+        for repo in repos {
+            let lastSync = DatabaseService.shared.getLastActionRunSyncTime(repoFullName: repo)
+            do {
+                let runs = try await GitHubService.shared.fetchWorkflowRuns(repoFullName: repo, since: lastSync)
+                for run in runs {
+                    DatabaseService.shared.upsertActionRun(run, repoFullName: repo)
+                }
+                
+                // Update sync time if we got results, or just update to now?
+                // If we use 'since', we should probably update to the latest created_at we got, or 'now' if we trust the API.
+                // Using 'now' is safer to avoid gaps if we assume the API returns everything up to now.
+                DatabaseService.shared.updateLastActionRunSyncTime(repoFullName: repo, date: Date())
+                print("Synced \(runs.count) action runs for \(repo)")
+            } catch {
+                print("Failed to sync action runs for \(repo): \(error)")
+            }
+        }
+    }
+    
+    private func findMatchedWorkflowRun(notification: GitHubNotification) async -> GitHubWorkflowRun? {
+        // Parse title: "Name workflow run status for branch branch"
+        // Example: "Pochi Integration test workflow run failed for main branch"
+        let title = notification.subject.title
+        
+        // 1. Extract Workflow Name
+        // Split by " workflow run "
+        let parts = title.components(separatedBy: " workflow run ")
+        guard parts.count >= 2 else { return nil }
+        
+        let workflowName = parts[0].trimmingCharacters(in: .whitespaces)
+        
+        // 2. Extract Branch Name
+        // Remainder: "failed for main branch" (or similar status)
+        let rest = parts[1]
+        
+        // Split by " for " to separate status from branch
+        // We take the last component to handle potential " for " in status (though unlikely)
+        let statusAndBranch = rest.components(separatedBy: " for ")
+        guard statusAndBranch.count >= 2 else { return nil }
+        
+        // The last part should be "{branchName} branch"
+        var branchPart = statusAndBranch.last!
+        if branchPart.hasSuffix(" branch") {
+            branchPart = String(branchPart.dropLast(7))
+        }
+        let branchName = branchPart.trimmingCharacters(in: .whitespaces)
+        
+        // 3. Query DB for runs in this repo
+        let runs = DatabaseService.shared.getActionRuns(repoFullName: notification.repository.fullName)
+        
+        // 4. Filter by name and branch
+        let candidates = runs.filter { run in
+            run.name == workflowName && run.headBranch == branchName
+        }
+        
+        // 5. Find the run closest in time to the notification
+        // We allow a tolerance (e.g., 10 minutes) because notification time and run time may differ slightly
+        let notificationTime = notification.updatedAt
+        
+        let matched = candidates.filter { run in
+            let diff = abs(run.updatedAt.timeIntervalSince(notificationTime))
+            return diff < 600 // 10 minutes tolerance
+        }.min(by: {
+            abs($0.updatedAt.timeIntervalSince(notificationTime)) < abs($1.updatedAt.timeIntervalSince(notificationTime))
+        })
+        
+        return matched
+    }
+}
+
+enum NotificationDisplayItem: Identifiable, Hashable {
+    case notification(GitHubNotification)
+    case group(title: String, notifications: [GitHubNotification])
+
+    var id: String {
+        switch self {
+        case .notification(let n):
+            return n.id
+        case .group(let title, let notifications):
+            let repo = notifications.first?.repository.fullName ?? ""
+            return "group|\(repo)|\(title)"
+        }
+    }
+    
+    var updatedAt: Date {
+        switch self {
+        case .notification(let n): return n.updatedAt
+        case .group(_, let notifications):
+            return notifications.map(\.updatedAt).max() ?? Date.distantPast
+        }
+    }
+    
+    var unread: Bool {
+        switch self {
+        case .notification(let n): return n.unread
+        case .group(_, let notifications):
+            return notifications.contains { $0.unread }
         }
     }
 }

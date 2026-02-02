@@ -10,6 +10,8 @@ class DatabaseService {
     private let notificationThreadTable = Table("notification_thread")
     private let localNotificationStateTable = Table("local_notification_state")
     private let issuePrTable = Table("issue_pr")
+    private let actionRunTable = Table("action_run")
+    private let repoSyncStateTable = Table("repo_sync_state")
 
     // notification_thread columns
     private let nt_id = Expression<String>("id")
@@ -17,6 +19,7 @@ class DatabaseService {
     private let nt_subject_type = Expression<String>("subject_type")
     private let nt_subject_id = Expression<Int?>("subject_id")
     private let nt_subject_url = Expression<String>("subject_url")
+    private let nt_title = Expression<String?>("title")
     private let nt_reason = Expression<String>("reason")
     private let nt_updated_at = Expression<Date>("updated_at")
     private let nt_last_synced_at = Expression<Date>("last_synced_at")
@@ -46,6 +49,24 @@ class DatabaseService {
     private let ip_updated_at = Expression<Date>("updated_at")
     private let ip_last_synced_at = Expression<Date>("last_synced_at")
 
+    // action_run columns
+    private let ar_id = Expression<Int64>("id")
+    private let ar_repo = Expression<String>("repo")
+    private let ar_name = Expression<String>("name")
+    private let ar_head_branch = Expression<String>("head_branch")
+    private let ar_head_sha = Expression<String>("head_sha")
+    private let ar_status = Expression<String?>("status")
+    private let ar_conclusion = Expression<String?>("conclusion")
+    private let ar_created_at = Expression<Date>("created_at")
+    private let ar_updated_at = Expression<Date>("updated_at")
+    private let ar_html_url = Expression<String>("html_url")
+    private let ar_run_number = Expression<Int>("run_number")
+    private let ar_event = Expression<String>("event")
+
+    // repo_sync_state columns
+    private let rss_repo = Expression<String>("repo")
+    private let rss_last_run_sync = Expression<Date?>("last_run_sync")
+
     private init() {
         do {
             let fileManager = FileManager.default
@@ -73,10 +94,14 @@ class DatabaseService {
                 t.column(nt_subject_type)
                 t.column(nt_subject_id)
                 t.column(nt_subject_url)
+                t.column(nt_title)
                 t.column(nt_reason)
                 t.column(nt_updated_at)
                 t.column(nt_last_synced_at)
             })
+
+            // Migration: Add title column if it doesn't exist
+            try? db.run(notificationThreadTable.addColumn(nt_title))
 
             try db.run(localNotificationStateTable.create(ifNotExists: true) { t in
                 t.column(lns_thread_id, primaryKey: true)
@@ -114,6 +139,26 @@ class DatabaseService {
              try? db.run(issuePrTable.addColumn(ip_review_comments))
              try? db.run(issuePrTable.addColumn(ip_merged_by))
              try? db.run(issuePrTable.addColumn(ip_merged_at))
+
+            try db.run(actionRunTable.create(ifNotExists: true) { t in
+                t.column(ar_id, primaryKey: true)
+                t.column(ar_repo)
+                t.column(ar_name)
+                t.column(ar_head_branch)
+                t.column(ar_head_sha)
+                t.column(ar_status)
+                t.column(ar_conclusion)
+                t.column(ar_created_at)
+                t.column(ar_updated_at)
+                t.column(ar_html_url)
+                t.column(ar_run_number)
+                t.column(ar_event)
+            })
+
+            try db.run(repoSyncStateTable.create(ifNotExists: true) { t in
+                t.column(rss_repo, primaryKey: true)
+                t.column(rss_last_run_sync)
+            })
         } catch {
             print("Failed to create tables: \(error)")
         }
@@ -132,6 +177,7 @@ class DatabaseService {
                 nt_subject_type <- notification.subject.type,
                 nt_subject_id <- Int(notification.subjectId ?? ""),
                 nt_subject_url <- (notification.subject.url ?? ""),
+                nt_title <- notification.subject.title,
                 nt_reason <- notification.reason,
                 nt_updated_at <- notification.updatedAt,
                 nt_last_synced_at <- Date()
@@ -220,7 +266,7 @@ class DatabaseService {
                     let isUnread = !isDone && !isRead
 
                     // Try to find title
-                    var title = ""
+                    var title = row[nt_title] ?? ""
                     if let number = row[nt_subject_id] {
                         let key = "\(repo.fullName)_\(number)"
                         if let foundTitle = titleMap[key] {
@@ -417,6 +463,85 @@ class DatabaseService {
             }
         } catch {
             print("Failed to fetch issue details: \(error)")
+        }
+        return results
+    }
+
+    // MARK: - Action Runs
+
+    func upsertActionRun(_ run: GitHubWorkflowRun, repoFullName: String) {
+        guard let db = db else { return }
+        do {
+            let insert = actionRunTable.insert(or: .replace,
+                ar_id <- Int64(run.id),
+                ar_repo <- repoFullName,
+                ar_name <- run.name,
+                ar_head_branch <- run.headBranch,
+                ar_head_sha <- run.headSha,
+                ar_status <- run.status,
+                ar_conclusion <- run.conclusion,
+                ar_created_at <- run.createdAt,
+                ar_updated_at <- run.updatedAt,
+                ar_html_url <- run.htmlUrl,
+                ar_run_number <- run.runNumber,
+                ar_event <- run.event
+            )
+            try db.run(insert)
+        } catch {
+            print("Failed to upsert action run: \(error)")
+        }
+    }
+
+    func getLastActionRunSyncTime(repoFullName: String) -> Date? {
+        guard let db = db else { return nil }
+        do {
+            let query = repoSyncStateTable.filter(rss_repo == repoFullName)
+            if let row = try db.pluck(query) {
+                return row[rss_last_run_sync]
+            }
+        } catch {
+            print("Failed to get last action run sync time: \(error)")
+        }
+        return nil
+    }
+
+    func updateLastActionRunSyncTime(repoFullName: String, date: Date) {
+        guard let db = db else { return }
+        do {
+            let insert = repoSyncStateTable.insert(or: .replace,
+                rss_repo <- repoFullName,
+                rss_last_run_sync <- date
+            )
+            try db.run(insert)
+        } catch {
+            print("Failed to update last action run sync time: \(error)")
+        }
+    }
+
+    func getActionRuns(repoFullName: String) -> [GitHubWorkflowRun] {
+        guard let db = db else { return [] }
+        var results: [GitHubWorkflowRun] = []
+
+        do {
+            let query = actionRunTable.filter(ar_repo == repoFullName).order(ar_created_at.desc)
+            let rows = try db.prepare(query)
+            for row in rows {
+                results.append(GitHubWorkflowRun(
+                    id: Int(row[ar_id]),
+                    name: row[ar_name],
+                    headBranch: row[ar_head_branch],
+                    headSha: row[ar_head_sha],
+                    status: row[ar_status],
+                    conclusion: row[ar_conclusion],
+                    createdAt: row[ar_created_at],
+                    updatedAt: row[ar_updated_at],
+                    htmlUrl: row[ar_html_url],
+                    runNumber: row[ar_run_number],
+                    event: row[ar_event]
+                ))
+            }
+        } catch {
+            print("Failed to fetch action runs: \(error)")
         }
         return results
     }
