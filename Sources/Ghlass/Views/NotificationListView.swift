@@ -65,8 +65,15 @@ struct NotificationListView: View {
                 .onChange(of: viewModel.selectedNotificationId) { _, newId in
                     if let id = newId {
                         if id.hasPrefix("group|") {
-                            // It's a group, we might want to mark all as read?
-                            // For now, let's just let the user view it.
+                            // It's a group, fetch details for all notifications in the group
+                            if let item = viewModel.displayItems.first(where: { $0.id == id }),
+                               case .group(_, let notifications) = item {
+                                for notification in notifications {
+                                    Task {
+                                        await viewModel.fetchDetail(for: notification)
+                                    }
+                                }
+                            }
                         } else if let notification = viewModel.notifications.first(where: { $0.id == id }) {
                             // Mark as read immediately when selected
                             Task {

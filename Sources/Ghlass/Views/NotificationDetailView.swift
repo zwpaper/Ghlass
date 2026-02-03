@@ -38,43 +38,121 @@ struct NotificationDetailView: View {
                     Color.clear.frame(height: 60)
 
                     // Title & Body Section (Grouped)
-                    if let url = notification.subject.url, !url.isEmpty {
-                        if notification.subject.type == "CheckSuite", let checkSuiteDetail = viewModel.checkSuiteCache[url] {
-                            CheckSuiteDetailView(detail: checkSuiteDetail, title: notification.subject.title)
-                        } else if let detail = viewModel.detailsCache[url] {
+                    let cacheKey = notification.cacheKey
+                    
+                    if !cacheKey.isEmpty {
+                        if notification.subject.type == "CheckSuite", let checkSuiteDetail = viewModel.checkSuiteCache[cacheKey] {
+                            CheckSuiteDetailView(detail: checkSuiteDetail, title: notification.subject.title, repoName: notification.repository.fullName, viewModel: viewModel)
+                        } else if notification.subject.type == "Release", let release = viewModel.releaseCache[cacheKey] {
+                            ReleaseDetailView(release: release, webViewHeight: $webViewHeight, isWebViewLoading: $isWebViewLoading)
+                        } else if let detail = viewModel.detailsCache[cacheKey] {
                             VStack(alignment: .leading, spacing: 0) {
                                 // Author & Description
                                 VStack(alignment: .leading, spacing: 16) {
-                                    HStack(spacing: 12) {
-                                        AsyncImage(url: URL(string: detail.user.avatarUrl)) { image in
-                                            image
-                                                .resizable()
-                                                .aspectRatio(contentMode: .fill)
-                                        } placeholder: {
-                                            Circle()
-                                                .fill(LinearGradient(
-                                                    colors: [Color.blue.opacity(0.3), Color.purple.opacity(0.3)],
-                                                    startPoint: .topLeading,
-                                                    endPoint: .bottomTrailing
-                                                ))
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        HStack(alignment: .center, spacing: 12) {
+                                            AsyncImage(url: URL(string: detail.user.avatarUrl)) { image in
+                                                image
+                                                    .resizable()
+                                                    .aspectRatio(contentMode: .fill)
+                                            } placeholder: {
+                                                Circle()
+                                                    .fill(LinearGradient(
+                                                        colors: [Color.blue.opacity(0.3), Color.purple.opacity(0.3)],
+                                                        startPoint: .topLeading,
+                                                        endPoint: .bottomTrailing
+                                                    ))
+                                            }
+                                            .frame(width: 40, height: 40)
+                                            .clipShape(Circle())
+                                            .overlay(
+                                                Circle()
+                                                    .stroke(Color.white.opacity(0.2), lineWidth: 2)
+                                            )
+
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(detail.user.login)
+                                                    .font(.headline)
+
+                                                Text("opened this \(notification.subject.type.lowercased())")
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                            }
+
+                                            Spacer()
+
+                                            VStack(alignment: .trailing, spacing: 2) {
+                                                if let createdAt = detail.createdAt {
+                                                    Text("Created \(createdAt.formatted(date: .abbreviated, time: .shortened))")
+                                                        .font(.caption2)
+                                                        .foregroundColor(.secondary)
+                                                }
+                                                Text("Updated \(detail.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                                                    .font(.caption2)
+                                                    .foregroundColor(.secondary)
+                                            }
                                         }
-                                        .frame(width: 40, height: 40)
-                                        .clipShape(Circle())
-                                        .overlay(
-                                            Circle()
-                                                .stroke(Color.white.opacity(0.2), lineWidth: 2)
-                                        )
 
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(detail.user.login)
-                                                .font(.headline)
+                                        if let assignees = detail.assignees, !assignees.isEmpty {
+                                            HStack(spacing: 8) {
+                                                Label("Assignees:", systemImage: "person.2")
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
 
-                                            Text("opened this \(notification.subject.type.lowercased())")
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
+                                                ForEach(assignees, id: \.login) { assignee in
+                                                    AsyncImage(url: URL(string: assignee.avatarUrl)) { image in
+                                                        image.resizable().aspectRatio(contentMode: .fill)
+                                                    } placeholder: {
+                                                        Circle().fill(Color.gray.opacity(0.3))
+                                                    }
+                                                    .frame(width: 20, height: 20)
+                                                    .clipShape(Circle())
+                                                    .help(assignee.login)
+                                                }
+                                            }
                                         }
 
-                                        Spacer()
+                                        if let labels = detail.labels, !labels.isEmpty {
+                                            FlowLayout(spacing: 6) {
+                                                ForEach(labels) { label in
+                                                    LabelBadge(label: label)
+                                                }
+                                            }
+                                        }
+
+                                        if detail.isMerged, let mergedBy = detail.mergedBy, let mergedAt = detail.mergedAt {
+                                            HStack(spacing: 6) {
+                                                Image(systemName: "arrow.left.to.line.circle.fill")
+                                                    .foregroundColor(.purple)
+                                                    .font(.caption)
+
+                                                Text("Merged by")
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+
+                                                HStack(spacing: 4) {
+                                                    AsyncImage(url: URL(string: mergedBy.avatarUrl)) { image in
+                                                        image.resizable().aspectRatio(contentMode: .fill)
+                                                    } placeholder: {
+                                                        Circle().fill(Color.gray.opacity(0.3))
+                                                    }
+                                                    .frame(width: 16, height: 16)
+                                                    .clipShape(Circle())
+
+                                                    Text(mergedBy.login)
+                                                        .font(.caption)
+                                                        .fontWeight(.medium)
+                                                }
+
+                                                Text("at \(mergedAt.formatted(date: .abbreviated, time: .shortened))")
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(Color.purple.opacity(0.1))
+                                            .clipShape(Capsule())
+                                        }
                                     }
 
                                     if let bodyHtml = detail.bodyHtml, !bodyHtml.isEmpty {
@@ -129,7 +207,7 @@ struct NotificationDetailView: View {
                             // Comments Section (Ungrouped)
 
                         // Check if we have comments OR if it's merged (since merged event is a timeline item)
-                        let timelineItems = getTimelineItems(url: url)
+                        let timelineItems = getTimelineItems(url: cacheKey)
 
                         if !timelineItems.isEmpty {
                             VStack(alignment: .leading, spacing: 16) {
@@ -146,7 +224,7 @@ struct NotificationDetailView: View {
                                         .foregroundColor(.secondary)
                                     Spacer()
 
-                                    if viewModel.loadingDetails.contains(url) {
+                                    if viewModel.loadingDetails.contains(cacheKey) {
                                         ProgressView()
                                             .controlSize(.small)
                                             .scaleEffect(0.8)
@@ -166,7 +244,7 @@ struct NotificationDetailView: View {
                                     }
                                 }
                             }
-                        } else if viewModel.loadingDetails.contains(url) {
+                        } else if viewModel.loadingDetails.contains(cacheKey) {
                             HStack(spacing: 12) {
                                 ProgressView()
                                     .controlSize(.small)
@@ -177,7 +255,7 @@ struct NotificationDetailView: View {
                             .frame(maxWidth: .infinity)
                             .padding(20)
                             .bubbleEffect(cornerRadius: 16)
-                        } else if viewModel.commentsCache[url] != nil { // Loaded but empty
+                        } else if viewModel.commentsCache[cacheKey] != nil { // Loaded but empty
                             HStack {
                                 Image(systemName: "bubble.left")
                                     .foregroundColor(.secondary)
@@ -189,9 +267,9 @@ struct NotificationDetailView: View {
                             .padding(20)
                             .bubbleEffect(cornerRadius: 16)
                         }
-                    } else if viewModel.loadingDetails.contains(url) {
+                    } else if viewModel.loadingDetails.contains(cacheKey) {
                         SkeletonDetailView()
-                    } else if let errorMessage = viewModel.failedDetails[url] {
+                    } else if let errorMessage = viewModel.failedDetails[cacheKey] {
                         VStack(spacing: 16) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .font(.system(size: 48))
@@ -244,7 +322,7 @@ struct NotificationDetailView: View {
         }
 
             // Sticky Header
-            DetailHeaderView(notification: notification, detail: notification.subject.url.flatMap { viewModel.detailsCache[$0] }, viewModel: viewModel)
+            DetailHeaderView(notification: notification, detail: viewModel.detailsCache[notification.cacheKey], viewModel: viewModel)
         }
         .background(
             ZStack {
@@ -291,6 +369,7 @@ struct NotificationDetailView: View {
         return items.sorted { $0.date < $1.date }
     }
 }
+
 
 struct MergedEventView: View {
     let user: GitHubOwner
@@ -611,8 +690,8 @@ struct DetailHeaderView: View {
                         .padding(.vertical, 8)
                         .bubbleEffect(cornerRadius: 20)
                     }
-                } else if let url = notification.subject.url, let checkSuiteDetail = viewModel.checkSuiteCache[url] {
-                     StatusBadge(status: checkSuiteDetail.checkSuite.status, conclusion: checkSuiteDetail.checkSuite.conclusion)
+                } else if let url = notification.subject.url, let checkSuiteDetail = viewModel.checkSuiteCache[url], let run = checkSuiteDetail.workflowRun {
+                     StatusBadge(status: run.status, conclusion: run.conclusion)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

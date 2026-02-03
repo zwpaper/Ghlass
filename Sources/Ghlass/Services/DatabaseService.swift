@@ -46,6 +46,7 @@ class DatabaseService {
     private let ip_review_comments = Expression<Int?>("review_comments")
     private let ip_merged_by = Expression<String?>("merged_by") // JSON
     private let ip_merged_at = Expression<Date?>("merged_at")
+    private let ip_created_at = Expression<Date?>("created_at")
     private let ip_updated_at = Expression<Date>("updated_at")
     private let ip_last_synced_at = Expression<Date>("last_synced_at")
 
@@ -129,6 +130,7 @@ class DatabaseService {
                 t.column(ip_review_comments)
                 t.column(ip_merged_by)
                 t.column(ip_merged_at)
+                t.column(ip_created_at)
                 t.column(ip_updated_at)
                 t.column(ip_last_synced_at)
             })
@@ -139,6 +141,7 @@ class DatabaseService {
              try? db.run(issuePrTable.addColumn(ip_review_comments))
              try? db.run(issuePrTable.addColumn(ip_merged_by))
              try? db.run(issuePrTable.addColumn(ip_merged_at))
+             try? db.run(issuePrTable.addColumn(ip_created_at))
 
             try db.run(actionRunTable.create(ifNotExists: true) { t in
                 t.column(ar_id, primaryKey: true)
@@ -287,7 +290,8 @@ class DatabaseService {
                         reason: row[nt_reason],
                         unread: isUnread,
                         updatedAt: row[nt_updated_at],
-                        url: row[nt_subject_url]
+                        url: row[nt_subject_url],
+                        isDone: isDone
                     )
                     results.append(notification)
                 }
@@ -395,6 +399,7 @@ class DatabaseService {
                 ip_review_comments <- issue.reviewComments,
                 ip_merged_by <- mergedByJson,
                 ip_merged_at <- issue.mergedAt,
+                ip_created_at <- issue.createdAt,
                 ip_updated_at <- issue.updatedAt,
                 ip_last_synced_at <- Date()
             )
@@ -416,6 +421,7 @@ class DatabaseService {
                 let state = row[ip_state]
                 let title = row[ip_title]
                 let updatedAt = row[ip_updated_at]
+                let createdAt = row[ip_created_at]
 
                 let user = try? JSONDecoder().decode(GitHubOwner.self, from: Data((row[ip_author] ?? "{}").utf8))
                 let assignees = try? JSONDecoder().decode([GitHubOwner].self, from: Data((row[ip_assignees] ?? "[]").utf8))
@@ -456,7 +462,8 @@ class DatabaseService {
                     mergedBy: mergedBy,
                     mergedAt: mergedAt,
                     additions: nil,
-                    deletions: nil
+                    deletions: nil,
+                    createdAt: createdAt
                 )
 
                 results[url] = detail
@@ -518,12 +525,16 @@ class DatabaseService {
         }
     }
 
-    func getActionRuns(repoFullName: String) -> [GitHubWorkflowRun] {
+    func getActionRuns(repoFullName: String, branch: String? = nil) -> [GitHubWorkflowRun] {
         guard let db = db else { return [] }
         var results: [GitHubWorkflowRun] = []
 
         do {
-            let query = actionRunTable.filter(ar_repo == repoFullName).order(ar_created_at.desc)
+            var query = actionRunTable.filter(ar_repo == repoFullName)
+            if let branch = branch {
+                query = query.filter(ar_head_branch == branch)
+            }
+            query = query.order(ar_created_at.desc)
             let rows = try db.prepare(query)
             for row in rows {
                 results.append(GitHubWorkflowRun(

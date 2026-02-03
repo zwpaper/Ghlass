@@ -75,7 +75,7 @@ struct GhlassApp: App {
                     }
                 }
                 .sheet(isPresented: $showSettings) {
-                    SettingsView(githubToken: $githubToken)
+                    SettingsView(githubToken: $githubToken, syncInterval: $viewModel.syncInterval)
                 }
         }
         .windowStyle(HiddenTitleBarWindowStyle())

@@ -8,12 +8,13 @@ struct GitHubNotification: Identifiable, Codable, Hashable {
     let unread: Bool
     let updatedAt: Date
     let url: String
-    
+    var isDone: Bool = false
+
     // Helper to get the ID of the subject from its URL
     var subjectId: String? {
         subject.url?.components(separatedBy: "/").last
     }
-    
+
     enum CodingKeys: String, CodingKey {
         case id
         case repository
@@ -23,7 +24,7 @@ struct GitHubNotification: Identifiable, Codable, Hashable {
         case updatedAt = "updated_at"
         case url
     }
-    
+
     func markedAsRead() -> GitHubNotification {
         return GitHubNotification(
             id: id,
@@ -32,8 +33,16 @@ struct GitHubNotification: Identifiable, Codable, Hashable {
             reason: reason,
             unread: false,
             updatedAt: updatedAt,
-            url: url
+            url: url,
+            isDone: isDone
         )
+    }
+    
+    var cacheKey: String {
+        if subject.type == "CheckSuite" {
+            return subject.url ?? "checksuite:\(id)"
+        }
+        return subject.url ?? ""
     }
 }
 
@@ -42,7 +51,7 @@ struct GitHubRepository: Codable, Hashable, Identifiable {
     let name: String
     let fullName: String
     let owner: GitHubOwner
-    
+
     enum CodingKeys: String, CodingKey {
         case id
         case name
@@ -54,7 +63,7 @@ struct GitHubRepository: Codable, Hashable, Identifiable {
 struct GitHubOwner: Codable, Hashable {
     let login: String
     let avatarUrl: String
-    
+
     enum CodingKeys: String, CodingKey {
         case login
         case avatarUrl = "avatar_url"
@@ -90,7 +99,7 @@ enum NotificationReason: String, CaseIterable, Identifiable {
     case teamMention = "team_mention"
     case ciActivity = "ci_activity"
     case other // fallback
-    
+
     var id: String { self.rawValue }
 }
 
@@ -115,9 +124,10 @@ struct GitHubResourceDetail: Codable, Hashable {
     let mergedAt: Date?
     let additions: Int?
     let deletions: Int?
-    
+    let createdAt: Date?
+
     var isMerged: Bool { merged == true }
-    
+
     enum CodingKeys: String, CodingKey {
         case id
         case number
@@ -137,6 +147,7 @@ struct GitHubResourceDetail: Codable, Hashable {
         case mergedAt = "merged_at"
         case additions
         case deletions
+        case createdAt = "created_at"
     }
 }
 
@@ -149,7 +160,7 @@ struct GitHubComment: Codable, Hashable, Identifiable {
     let htmlUrl: String
     let diffHunk: String?
     let path: String?
-    
+
     enum CodingKeys: String, CodingKey {
         case id
         case body
@@ -173,7 +184,7 @@ struct GitHubCheckSuite: Codable, Hashable, Identifiable {
     let repository: GitHubRepository
     let createdAt: Date?
     let updatedAt: Date?
-    
+
     enum CodingKeys: String, CodingKey {
         case id
         case status
@@ -197,7 +208,7 @@ struct GitHubCheckRun: Codable, Hashable, Identifiable {
     let completedAt: Date?
     let htmlUrl: String?
     let detailsUrl: String?
-    
+
     enum CodingKeys: String, CodingKey {
         case id
         case name
@@ -218,8 +229,6 @@ struct GitHubApp: Codable, Hashable, Identifiable {
 }
 
 struct GitHubCheckSuiteDetail: Hashable {
-    let checkSuite: GitHubCheckSuite
-    let checkRuns: [GitHubCheckRun]
     var workflowRun: GitHubWorkflowRun?
 }
 
@@ -235,7 +244,7 @@ struct GitHubWorkflowRun: Codable, Hashable, Identifiable {
     let htmlUrl: String
     let runNumber: Int
     let event: String
-    
+
     enum CodingKeys: String, CodingKey {
         case id
         case name
@@ -254,4 +263,116 @@ struct GitHubWorkflowRun: Codable, Hashable, Identifiable {
 struct GitHubWorkflowRunsResponse: Decodable {
     let total_count: Int
     let workflow_runs: [GitHubWorkflowRun]
+}
+
+struct GitHubJob: Codable, Hashable, Identifiable {
+    let id: Int
+    let runId: Int
+    let name: String
+    let status: String? // "queued", "in_progress", "completed"
+    let conclusion: String? // "success", "failure", "neutral", "cancelled", "skipped", "timed_out", "action_required"
+    let startedAt: Date?
+    let completedAt: Date?
+    let htmlUrl: String?
+    let steps: [GitHubStep]?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case runId = "run_id"
+        case name
+        case status
+        case conclusion
+        case startedAt = "started_at"
+        case completedAt = "completed_at"
+        case htmlUrl = "html_url"
+        case steps
+    }
+}
+
+struct GitHubStep: Codable, Hashable, Identifiable {
+    // Steps don't always have IDs in the API response, so we might need a computed ID or use number
+    // Actually the API docs say steps have "number".
+    // Let's make it Identifiable by combining name and number if needed, or just use UUID if not provided.
+    // The API response example doesn't show an ID for steps, just number.
+    
+    let name: String
+    let status: String?
+    let conclusion: String?
+    let number: Int
+    let startedAt: Date?
+    let completedAt: Date?
+
+    var id: String { "\(number)-\(name)" }
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case status
+        case conclusion
+        case number
+        case startedAt = "started_at"
+        case completedAt = "completed_at"
+    }
+}
+
+struct GitHubJobsResponse: Decodable {
+    let total_count: Int
+    let jobs: [GitHubJob]
+}
+
+struct GitHubRelease: Codable, Hashable, Identifiable {
+    let id: Int
+    let tagName: String
+    let targetCommitish: String
+    let name: String?
+    let body: String?
+    let bodyHtml: String?
+    let draft: Bool
+    let prerelease: Bool
+    let createdAt: Date
+    let publishedAt: Date?
+    let author: GitHubOwner
+    let assets: [GitHubAsset]
+    let htmlUrl: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case tagName = "tag_name"
+        case targetCommitish = "target_commitish"
+        case name
+        case body
+        case bodyHtml = "body_html"
+        case draft
+        case prerelease
+        case createdAt = "created_at"
+        case publishedAt = "published_at"
+        case author
+        case assets
+        case htmlUrl = "html_url"
+    }
+}
+
+struct GitHubAsset: Codable, Hashable, Identifiable {
+    let id: Int
+    let name: String
+    let label: String?
+    let contentType: String
+    let state: String
+    let size: Int
+    let downloadCount: Int
+    let createdAt: Date
+    let updatedAt: Date
+    let browserDownloadUrl: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case label
+        case contentType = "content_type"
+        case state
+        case size
+        case downloadCount = "download_count"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+        case browserDownloadUrl = "browser_download_url"
+    }
 }

@@ -18,6 +18,11 @@ struct SidebarView: View {
                             .foregroundColor(viewModel.showUnreadOnly ? .blue : .secondary)
                         Text("Unread Only")
                         Spacer()
+                        if viewModel.unreadCount > 0 {
+                            Text("\(viewModel.unreadCount)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
                     .contentShape(Rectangle())
                     .onTapGesture {
@@ -31,6 +36,11 @@ struct SidebarView: View {
                             .foregroundColor(viewModel.showOpenOnly ? .blue : .secondary)
                         Text("Open Only")
                         Spacer()
+                        if viewModel.openCount > 0 {
+                            Text("\(viewModel.openCount)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
                     .contentShape(Rectangle())
                     .onTapGesture {

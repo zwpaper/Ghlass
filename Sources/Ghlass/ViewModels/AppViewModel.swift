@@ -15,6 +15,8 @@ class AppViewModel: ObservableObject {
     @Published var detailsCache: [String: GitHubResourceDetail] = [:]
     @Published var commentsCache: [String: [GitHubComment]] = [:]
     @Published var checkSuiteCache: [String: GitHubCheckSuiteDetail] = [:]
+    @Published var releaseCache: [String: GitHubRelease] = [:]
+    @Published var jobsCache: [Int: [GitHubJob]] = [:] // Key: Run ID
     @Published var loadingDetails: Set<String> = []
     @Published var failedDetails: [String: String] = [:] // URL -> Error message
 
@@ -24,21 +26,73 @@ class AppViewModel: ObservableObject {
     @Published var showUnreadOnly = true
     @Published var showOpenOnly = false
 
+    // Auto-Sync
+    @Published var syncInterval: Int {
+        didSet {
+            UserDefaults.standard.set(syncInterval, forKey: "syncInterval")
+            startAutoSync()
+        }
+    }
+    private var timer: Timer?
+
+    init() {
+        self.syncInterval = UserDefaults.standard.integer(forKey: "syncInterval")
+        if self.syncInterval == 0 { self.syncInterval = 10 } // Default to 10 minutes
+        startAutoSync()
+    }
+
+    func startAutoSync() {
+        stopAutoSync()
+        guard syncInterval > 0 else { return }
+
+        print("Starting auto-sync with interval: \(syncInterval) minutes")
+        timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(syncInterval * 60), repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                print("Auto-syncing notifications...")
+                await self?.fetchNotifications()
+            }
+        }
+    }
+
+    func stopAutoSync() {
+        timer?.invalidate()
+        timer = nil
+    }
+
     // Computed properties for filters
+
+    // Helper to get non-archived notifications
+    var activeNotifications: [GitHubNotification] {
+        notifications.filter { !$0.isDone }
+    }
+
     var availableRepos: [String] {
-        Array(Set(notifications.map { $0.repository.fullName })).sorted()
+        Array(Set(activeNotifications.map { $0.repository.fullName })).sorted()
     }
 
     var availableTypes: [String] {
-        Array(Set(notifications.map { $0.subject.type })).sorted()
+        Array(Set(activeNotifications.map { $0.subject.type })).sorted()
     }
 
     func countForRepo(_ repo: String) -> Int {
-        notifications.filter { $0.repository.fullName == repo }.count
+        activeNotifications.filter { $0.repository.fullName == repo }.count
     }
 
     func countForType(_ type: String) -> Int {
-        notifications.filter { $0.subject.type == type }.count
+        activeNotifications.filter { $0.subject.type == type }.count
+    }
+
+    var unreadCount: Int {
+        activeNotifications.filter { $0.unread }.count
+    }
+
+    var openCount: Int {
+        activeNotifications.filter { notification in
+            if let url = notification.subject.url, let detail = detailsCache[url] {
+                return detail.state == "open"
+            }
+            return true
+        }.count
     }
 
     var filteredNotifications: [GitHubNotification] {
@@ -50,6 +104,12 @@ class AppViewModel: ObservableObject {
 
             // Type Filter
             if !selectedTypes.isEmpty && !selectedTypes.contains(notification.subject.type) {
+                return false
+            }
+
+            // Archived/Done Filter
+            // Even when "Unread Only" is unchecked, we should not show archived notifications
+            if notification.isDone {
                 return false
             }
 
@@ -85,7 +145,7 @@ class AppViewModel: ObservableObject {
         let filtered = filteredNotifications
         var groups: [String: [GitHubNotification]] = [:] // Key: "repo|normalizedTitle"
         var singles: [GitHubNotification] = []
-        
+
         for notification in filtered {
             if notification.subject.type == "CheckSuite" {
                 let normalizedTitle = normalizeCheckSuiteTitle(notification.subject.title)
@@ -95,44 +155,44 @@ class AppViewModel: ObservableObject {
                 singles.append(notification)
             }
         }
-        
+
         var items: [NotificationDisplayItem] = []
-        
+
         // Add singles
         for n in singles {
             items.append(.notification(n))
         }
-        
+
         // Add groups
         for (key, notifs) in groups {
             // Extract title from key
             let title = String(key.split(separator: "|", maxSplits: 1).last ?? "")
             items.append(.group(title: title, notifications: notifs))
         }
-        
+
         // Sort by updatedAt
         return items.sorted { $0.updatedAt > $1.updatedAt }
     }
-    
+
     private func normalizeCheckSuiteTitle(_ title: String) -> String {
         // Remove ", Attempt #N" or " Attempt #N"
         // Example: "Pochi Integration test workflow run, Attempt #3 failed for main branch"
         // Becomes: "Pochi Integration test workflow run failed for main branch"
-        
+
         var normalized = title
-        
+
         // Regex to match ", Attempt #\d+" or " Attempt #\d+"
         // We use a simple replacement approach
         // Note: NSRegularExpression is robust
-        
+
         if let regex = try? NSRegularExpression(pattern: ",? Attempt #\\d+", options: .caseInsensitive) {
             let range = NSRange(location: 0, length: normalized.utf16.count)
             normalized = regex.stringByReplacingMatches(in: normalized, options: [], range: range, withTemplate: "")
         }
-        
+
         // Clean up double spaces if any created (though template is empty string, so "run, Attempt #3 failed" -> "run failed")
         // If "run Attempt #3 failed" -> "run failed"
-        
+
         return normalized.replacingOccurrences(of: "  ", with: " ")
     }
 
@@ -148,7 +208,7 @@ class AppViewModel: ObservableObject {
 
             // 3. Upsert threads to DB and fetch details for Issues/PRs
             var reposToSync: Set<String> = []
-            
+
             for notification in fetched {
                 DatabaseService.shared.upsertNotificationThread(notification)
                 reposToSync.insert(notification.repository.fullName)
@@ -178,7 +238,7 @@ class AppViewModel: ObservableObject {
                     }
                 }
             }
-            
+
             // Sync action runs for relevant repositories
             await syncActionRuns(for: reposToSync)
 
@@ -204,12 +264,12 @@ class AppViewModel: ObservableObject {
         let idsToMark = resolveNotificationIds(from: selectedNotificationIds)
         await markAsDone(ids: Array(idsToMark))
     }
-    
+
     func resolveNotificationIds(from ids: Set<String>) -> Set<String> {
         var result = Set<String>()
         // We need to look up in displayItems to find groups
         let currentItems = displayItems
-        
+
         for id in ids {
             if id.hasPrefix("group|") {
                 // Find the group
@@ -272,43 +332,58 @@ class AppViewModel: ObservableObject {
 
     func fetchDetail(for notification: GitHubNotification) async {
         // Fetch latest details and comments from GitHub API when a notification is selected
-        guard let url = notification.subject.url, !url.isEmpty else {
-            print("⚠️ No subject URL for notification: \(notification.subject.title) (ID: \(notification.id))")
-            return
+
+        let cacheKey = notification.cacheKey
+        let url = notification.subject.url
+
+        if notification.subject.type != "CheckSuite" {
+            guard let validUrl = url, !validUrl.isEmpty else {
+                print("⚠️ No subject URL for notification: \(notification.subject.title) (ID: \(notification.id))")
+                return
+            }
         }
 
         // 1. Check if already loading to prevent duplicate requests
-        if loadingDetails.contains(url) {
+        if loadingDetails.contains(cacheKey) {
             print("⏳ Already loading details for: \(notification.subject.title)")
             return
         }
 
         // 2. Mark as loading and clear any previous errors
-        loadingDetails.insert(url)
-        failedDetails.removeValue(forKey: url)
+        loadingDetails.insert(cacheKey)
+        failedDetails.removeValue(forKey: cacheKey)
 
         print("🔄 Fetching details for: \(notification.subject.title)")
         print("   Type: \(notification.subject.type)")
-        print("   URL: \(url)")
+        print("   URL: \(url ?? "nil")")
 
         do {
             if notification.subject.type == "CheckSuite" {
-                let checkSuite = try await GitHubService.shared.fetchCheckSuite(url: url)
-                let checkRuns = try await GitHubService.shared.fetchCheckRuns(url: checkSuite.checkRunsUrl)
-                
                 // Try to match with a workflow run
                 let matchedRun = await findMatchedWorkflowRun(notification: notification)
-                
-                checkSuiteCache[url] = GitHubCheckSuiteDetail(
-                    checkSuite: checkSuite,
-                    checkRuns: checkRuns,
+
+                checkSuiteCache[cacheKey] = GitHubCheckSuiteDetail(
                     workflowRun: matchedRun
                 )
-                print("✓ Fetched check suite details")
+                print("✓ Fetched check suite details (from local DB)")
+
+                if let run = matchedRun {
+                    Task {
+                        await fetchJobs(for: run, repoFullName: notification.repository.fullName)
+                    }
+                }
+            } else if notification.subject.type == "Release" {
+                // Fetch release details
+                let detailUrl = url!
+                let release = try await GitHubService.shared.fetchRelease(url: detailUrl)
+                releaseCache[cacheKey] = release
+                print("✓ Fetched release: \(release.tagName)")
             } else {
                 // 3. Fetch latest details from GitHub API
-                let detail = try await GitHubService.shared.fetchResourceDetail(url: url)
-                detailsCache[url] = detail
+                // We know url is not nil here due to the guard above
+                let detailUrl = url!
+                let detail = try await GitHubService.shared.fetchResourceDetail(url: detailUrl)
+                detailsCache[cacheKey] = detail
                 print("✓ Fetched detail - State: \(detail.state), Number: \(detail.number)")
 
                 // 4. Update DB if it's an Issue/PR
@@ -328,9 +403,9 @@ class AppViewModel: ObservableObject {
 
                 if notification.subject.type == "PullRequest" {
                     // For PRs, we want both review comments (code) and issue comments (conversation)
-                    let reviewCommentsUrl = url + "/comments"
+                    let reviewCommentsUrl = detailUrl + "/comments"
                     // Construct Issue URL from Pull URL: .../pulls/123 -> .../issues/123
-                    let issueCommentsUrl = url.replacingOccurrences(of: "/pulls/", with: "/issues/") + "/comments"
+                    let issueCommentsUrl = detailUrl.replacingOccurrences(of: "/pulls/", with: "/issues/") + "/comments"
 
                     print("🔄 Fetching PR comments from: \(reviewCommentsUrl) and \(issueCommentsUrl)")
 
@@ -342,29 +417,43 @@ class AppViewModel: ObservableObject {
                     let issues = try await issueCommentsTask
                     allComments = reviews + issues
                 } else {
-                    let commentsUrl = url + "/comments"
+                    let commentsUrl = detailUrl + "/comments"
                     print("🔄 Fetching comments from: \(commentsUrl)")
                     allComments = try await GitHubService.shared.fetchComments(commentsUrl: commentsUrl)
                 }
 
                 allComments.sort { $0.createdAt < $1.createdAt }
-                commentsCache[url] = allComments
+                commentsCache[cacheKey] = allComments
                 print("✓ Fetched \(allComments.count) comments")
             }
 
             // 6. Clear loading state
-            loadingDetails.remove(url)
+            loadingDetails.remove(cacheKey)
 
             print("✅ Successfully loaded details for: \(notification.subject.title)")
 
         } catch {
-            print("❌ Failed to fetch details for \(url): \(error)")
+            print("❌ Failed to fetch details for \(url ?? "nil"): \(error)")
             if let serviceError = error as? GitHubService.ServiceError {
-                failedDetails[url] = serviceError.errorDescription ?? "Unknown error"
+                failedDetails[cacheKey] = serviceError.errorDescription ?? "Unknown error"
             } else {
-                failedDetails[url] = error.localizedDescription
+                failedDetails[cacheKey] = error.localizedDescription
             }
-            loadingDetails.remove(url)
+            loadingDetails.remove(cacheKey)
+        }
+    }
+
+    func fetchJobs(for run: GitHubWorkflowRun, repoFullName: String) async {
+        // Check if already loaded? Maybe we want to refresh.
+        // For now, let's just fetch.
+
+        do {
+            print("🔄 Fetching jobs for run #\(run.id)")
+            let jobs = try await GitHubService.shared.fetchWorkflowJobs(repoFullName: repoFullName, runId: run.id)
+            jobsCache[run.id] = jobs
+            print("✓ Fetched \(jobs.count) jobs for run #\(run.id)")
+        } catch {
+            print("❌ Failed to fetch jobs for run #\(run.id): \(error)")
         }
     }
 
@@ -383,9 +472,9 @@ class AppViewModel: ObservableObject {
             selectedTypes.insert(type)
         }
     }
-    
+
     // MARK: - Action Runs Support
-    
+
     private func syncActionRuns(for repos: Set<String>) async {
         for repo in repos {
             let lastSync = DatabaseService.shared.getLastActionRunSyncTime(repoFullName: repo)
@@ -394,7 +483,7 @@ class AppViewModel: ObservableObject {
                 for run in runs {
                     DatabaseService.shared.upsertActionRun(run, repoFullName: repo)
                 }
-                
+
                 // Update sync time if we got results, or just update to now?
                 // If we use 'since', we should probably update to the latest created_at we got, or 'now' if we trust the API.
                 // Using 'now' is safer to avoid gaps if we assume the API returns everything up to now.
@@ -405,54 +494,56 @@ class AppViewModel: ObservableObject {
             }
         }
     }
-    
+
     private func findMatchedWorkflowRun(notification: GitHubNotification) async -> GitHubWorkflowRun? {
         // Parse title: "Name workflow run status for branch branch"
         // Example: "Pochi Integration test workflow run failed for main branch"
         let title = notification.subject.title
-        
+
         // 1. Extract Workflow Name
         // Split by " workflow run "
         let parts = title.components(separatedBy: " workflow run ")
         guard parts.count >= 2 else { return nil }
-        
+
         let workflowName = parts[0].trimmingCharacters(in: .whitespaces)
-        
+
         // 2. Extract Branch Name
         // Remainder: "failed for main branch" (or similar status)
         let rest = parts[1]
-        
+
         // Split by " for " to separate status from branch
         // We take the last component to handle potential " for " in status (though unlikely)
         let statusAndBranch = rest.components(separatedBy: " for ")
         guard statusAndBranch.count >= 2 else { return nil }
-        
+
         // The last part should be "{branchName} branch"
         var branchPart = statusAndBranch.last!
         if branchPart.hasSuffix(" branch") {
             branchPart = String(branchPart.dropLast(7))
         }
         let branchName = branchPart.trimmingCharacters(in: .whitespaces)
-        
+
         // 3. Query DB for runs in this repo
-        let runs = DatabaseService.shared.getActionRuns(repoFullName: notification.repository.fullName)
-        
+        let runs = DatabaseService.shared.getActionRuns(repoFullName: notification.repository.fullName, branch: branchName)
+
         // 4. Filter by name and branch
         let candidates = runs.filter { run in
-            run.name == workflowName && run.headBranch == branchName
+            run.name == workflowName
         }
-        
+
         // 5. Find the run closest in time to the notification
-        // We allow a tolerance (e.g., 10 minutes) because notification time and run time may differ slightly
+        // We allow a tolerance (e.g., 1 minutes) because notification time and run time may differ slightly
         let notificationTime = notification.updatedAt
-        
+
         let matched = candidates.filter { run in
             let diff = abs(run.updatedAt.timeIntervalSince(notificationTime))
-            return diff < 600 // 10 minutes tolerance
+            return diff <= 60 // 1 minutes tolerance
         }.min(by: {
             abs($0.updatedAt.timeIntervalSince(notificationTime)) < abs($1.updatedAt.timeIntervalSince(notificationTime))
         })
-        
+
+        print("Matched run: \(matched?.htmlUrl ?? "nil")")
+
         return matched
     }
 }
@@ -470,7 +561,7 @@ enum NotificationDisplayItem: Identifiable, Hashable {
             return "group|\(repo)|\(title)"
         }
     }
-    
+
     var updatedAt: Date {
         switch self {
         case .notification(let n): return n.updatedAt
@@ -478,7 +569,7 @@ enum NotificationDisplayItem: Identifiable, Hashable {
             return notifications.map(\.updatedAt).max() ?? Date.distantPast
         }
     }
-    
+
     var unread: Bool {
         switch self {
         case .notification(let n): return n.unread
