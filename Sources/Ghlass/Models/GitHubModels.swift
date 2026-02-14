@@ -9,6 +9,7 @@ struct GitHubNotification: Identifiable, Codable, Hashable {
     let updatedAt: Date
     let url: String
     var isDone: Bool = false
+    var isPinned: Bool = false
 
     // Helper to get the ID of the subject from its URL
     var subjectId: String? {
@@ -34,7 +35,8 @@ struct GitHubNotification: Identifiable, Codable, Hashable {
             unread: false,
             updatedAt: updatedAt,
             url: url,
-            isDone: isDone
+            isDone: isDone,
+            isPinned: isPinned
         )
     }
     

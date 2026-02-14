@@ -31,6 +31,7 @@ class DatabaseService {
     private let lns_is_read = Expression<Bool>("is_read")
     private let lns_is_snoozed = Expression<Bool>("is_snoozed")
     private let lns_snoozed_until = Expression<Date?>("snoozed_until")
+    private let lns_is_pinned = Expression<Bool>("is_pinned")
 
     // issue_pr columns
     private let ip_id = Expression<Int64>("id")
@@ -111,10 +112,12 @@ class DatabaseService {
                 t.column(lns_is_read, defaultValue: false)
                 t.column(lns_is_snoozed)
                 t.column(lns_snoozed_until)
+                t.column(lns_is_pinned, defaultValue: false)
             })
 
             // Migration: Add is_read column if it doesn't exist
             // try? db.run(localNotificationStateTable.addColumn(lns_is_read, defaultValue: false))
+            try? db.run(localNotificationStateTable.addColumn(lns_is_pinned, defaultValue: false))
 
             try db.run(issuePrTable.create(ifNotExists: true) { t in
                 t.column(ip_id, primaryKey: true)
@@ -248,20 +251,21 @@ class DatabaseService {
             }
 
             // Also fetch local state
-            var stateMap: [String: (isDone: Bool, isRead: Bool, isSnoozed: Bool)] = [:]
+            var stateMap: [String: (isDone: Bool, isRead: Bool, isSnoozed: Bool, isPinned: Bool)] = [:]
             let states = try db.prepare(localNotificationStateTable)
             for state in states {
-                stateMap[state[lns_thread_id]] = (state[lns_is_done], state[lns_is_read], state[lns_is_snoozed])
+                stateMap[state[lns_thread_id]] = (state[lns_is_done], state[lns_is_read], state[lns_is_snoozed], state[lns_is_pinned])
             }
 
             for row in threads {
                 if let repo = try? JSONDecoder().decode(GitHubRepository.self, from: Data(row[nt_repository].utf8)) {
                     let threadId = row[nt_id]
-                    // Default state: not done, not read, not snoozed
-                    let localState = stateMap[threadId] ?? (false, false, false)
+                    // Default state: not done, not read, not snoozed, not pinned
+                    let localState = stateMap[threadId] ?? (false, false, false, false)
 
                     let isDone = localState.isDone
                     let isRead = localState.isRead
+                    let isPinned = localState.isPinned
 
                     // Calculate unread status
                     // If it is done (archived), it is definitely not unread.
@@ -291,7 +295,8 @@ class DatabaseService {
                         unread: isUnread,
                         updatedAt: row[nt_updated_at],
                         url: row[nt_subject_url],
-                        isDone: isDone
+                        isDone: isDone,
+                        isPinned: isPinned
                     )
                     results.append(notification)
                 }
@@ -307,18 +312,22 @@ class DatabaseService {
     func markNotificationAsDone(threadId: String) {
         guard let db = db else { return }
         do {
-            // We need to preserve is_read state if possible, or just set it to true as well?
-            // Insert or replace will overwrite. We should probably update if exists, or insert default.
-            // But simpler to just overwrite for now, assuming if done, it implies read.
-            let insert = localNotificationStateTable.insert(or: .replace,
-                lns_thread_id <- threadId,
-                lns_is_done <- true,
-                lns_done_at <- Date(),
-                lns_is_read <- true,
-                lns_is_snoozed <- false,
-                lns_snoozed_until <- nil
-            )
-            try db.run(insert)
+            // Update if exists to preserve is_pinned, else insert
+            let query = localNotificationStateTable.filter(lns_thread_id == threadId)
+            if try db.run(query.update(lns_is_done <- true, lns_done_at <- Date(), lns_is_read <- true)) > 0 {
+                // Updated successfully
+            } else {
+                let insert = localNotificationStateTable.insert(
+                    lns_thread_id <- threadId,
+                    lns_is_done <- true,
+                    lns_done_at <- Date(),
+                    lns_is_read <- true,
+                    lns_is_snoozed <- false,
+                    lns_snoozed_until <- nil,
+                    lns_is_pinned <- false
+                )
+                try db.run(insert)
+            }
         } catch {
             print("Failed to mark as done: \(error)")
         }
@@ -327,21 +336,7 @@ class DatabaseService {
     func markNotificationAsRead(threadId: String) {
         guard let db = db else { return }
         do {
-            // Check if record exists to preserve other flags (like is_done, though if it's done it's likely read)
-            // For simplicity in this "upsert" logic:
-            _ = localNotificationStateTable.insert(or: .replace,
-                lns_thread_id <- threadId,
-                lns_is_read <- true,
-                // We should be careful not to reset is_done if it was done.
-                // But if we are just marking as read, we assume it's not done?
-                // Or better: use update if exists.
-                // SQLite.swift upsert is tricky without raw SQL for partial updates.
-                // Let's try to read first.
-                lns_is_done <- false, // Defaulting to false might be risky if it was true.
-                lns_is_snoozed <- false
-            )
-
-            // Better approach: update if exists, else insert.
+            // Update if exists, else insert
             let query = localNotificationStateTable.filter(lns_thread_id == threadId)
             if try db.run(query.update(lns_is_read <- true)) > 0 {
                 // Updated successfully
@@ -351,11 +346,34 @@ class DatabaseService {
                     lns_thread_id <- threadId,
                     lns_is_read <- true,
                     lns_is_done <- false,
-                    lns_is_snoozed <- false
+                    lns_is_snoozed <- false,
+                    lns_is_pinned <- false
                 ))
             }
         } catch {
             print("Failed to mark as read: \(error)")
+        }
+    }
+
+    func markNotificationAsPinned(threadId: String, pinned: Bool) {
+        guard let db = db else { return }
+        do {
+            // Update if exists, else insert
+            let query = localNotificationStateTable.filter(lns_thread_id == threadId)
+            if try db.run(query.update(lns_is_pinned <- pinned)) > 0 {
+                // Updated successfully
+            } else {
+                // Insert new
+                try db.run(localNotificationStateTable.insert(
+                    lns_thread_id <- threadId,
+                    lns_is_read <- false, // Default
+                    lns_is_done <- false,
+                    lns_is_snoozed <- false,
+                    lns_is_pinned <- pinned
+                ))
+            }
+        } catch {
+            print("Failed to mark as pinned: \(error)")
         }
     }
 

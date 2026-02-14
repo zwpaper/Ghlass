@@ -19,45 +19,17 @@ struct NotificationListView: View {
                 }
             } else {
                 List(selection: $viewModel.selectedNotificationIds) {
-                    ForEach(viewModel.displayItems) { item in
-                        switch item {
-                        case .notification(let notification):
-                            NotificationRow(notification: notification, viewModel: viewModel)
-                                .tag(notification.id)
-                                .listRowSeparator(.hidden)
-                                .listRowBackground(Color.clear)
-                                .contentShape(RoundedRectangle(cornerRadius: 12))
-                                .padding(.vertical, 4)
-                                .transition(.asymmetric(
-                                    insertion: .opacity.combined(with: .scale(scale: 0.9)),
-                                    removal: .opacity.combined(with: .scale(scale: 0.9))
-                                ))
-                                .onTapGesture {
-                                    withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
-                                        if viewModel.selectedNotificationIds.contains(notification.id) {
-                                            viewModel.selectedNotificationId = notification.id
-                                        } else {
-                                            viewModel.selectedNotificationId = notification.id
-                                        }
-                                    }
-                                }
-
-                        case .group(let title, let notifications):
-                            NotificationGroupRow(title: title, notifications: notifications, viewModel: viewModel)
-                                .tag(item.id)
-                                .listRowSeparator(.hidden)
-                                .listRowBackground(Color.clear)
-                                .contentShape(RoundedRectangle(cornerRadius: 12))
-                                .padding(.vertical, 4)
-                                .transition(.asymmetric(
-                                    insertion: .opacity.combined(with: .scale(scale: 0.9)),
-                                    removal: .opacity.combined(with: .scale(scale: 0.9))
-                                ))
-                                .onTapGesture {
-                                    withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
-                                        viewModel.selectedNotificationId = item.id
-                                    }
-                                }
+                    if !viewModel.pinnedDisplayItems.isEmpty {
+                        Section(header: Text("Pinned").font(.caption).foregroundColor(.secondary)) {
+                            ForEach(viewModel.pinnedDisplayItems) { item in
+                                notificationItem(item)
+                            }
+                        }
+                    }
+                    
+                    Section(header: Text("Notifications").font(.caption).foregroundColor(.secondary)) {
+                        ForEach(viewModel.unpinnedDisplayItems) { item in
+                            notificationItem(item)
                         }
                     }
                 }
@@ -142,6 +114,49 @@ struct NotificationListView: View {
             }
         }
     }
+    
+    @ViewBuilder
+    func notificationItem(_ item: NotificationDisplayItem) -> some View {
+        switch item {
+        case .notification(let notification):
+            NotificationRow(notification: notification, viewModel: viewModel)
+                .tag(notification.id)
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+                .contentShape(RoundedRectangle(cornerRadius: 12))
+                .padding(.vertical, 4)
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .scale(scale: 0.9)),
+                    removal: .opacity.combined(with: .scale(scale: 0.9))
+                ))
+                .onTapGesture {
+                    withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                        if viewModel.selectedNotificationIds.contains(notification.id) {
+                            viewModel.selectedNotificationId = notification.id
+                        } else {
+                            viewModel.selectedNotificationId = notification.id
+                        }
+                    }
+                }
+
+        case .group(let title, let notifications):
+            NotificationGroupRow(title: title, notifications: notifications, viewModel: viewModel)
+                .tag(item.id)
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+                .contentShape(RoundedRectangle(cornerRadius: 12))
+                .padding(.vertical, 4)
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .scale(scale: 0.9)),
+                    removal: .opacity.combined(with: .scale(scale: 0.9))
+                ))
+                .onTapGesture {
+                    withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                        viewModel.selectedNotificationId = item.id
+                    }
+                }
+        }
+    }
 }
 
 struct NotificationRow: View {
@@ -218,6 +233,17 @@ struct NotificationRow: View {
                 }
                 .buttonStyle(PlainButtonStyle())
                 .help("Mark as done (Archive)")
+
+                Button(action: {
+                    viewModel.togglePin(id: notification.id)
+                }) {
+                    Image(systemName: notification.isPinned ? "pin.fill" : "pin")
+                        .foregroundColor(notification.isPinned ? .orange : .secondary)
+                        .padding(4)
+                        .rotationEffect(.degrees(notification.isPinned ? 45 : 0))
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help(notification.isPinned ? "Unpin" : "Pin")
 
                 if let url = notification.subject.url,
                    let detail = viewModel.detailsCache[url] {
@@ -312,8 +338,21 @@ struct NotificationGroupRow: View {
     
     var isSelected: Bool {
         let repo = notifications.first?.repository.fullName ?? ""
-        let groupId = "group|\(repo)|\(title)"
+        let isPinned = notifications.first?.isPinned ?? false
+        let groupId = "group|\(repo)|\(title)|\(isPinned ? "pinned" : "unpinned")"
         return viewModel.selectedNotificationId == groupId
+    }
+    
+    var isPinned: Bool {
+        // If any is pinned, we consider the group pinned for display purposes?
+        // Or if all are pinned?
+        // Based on AppViewModel logic, if we pin a group, we pin all.
+        // So checking the first one or all should be consistent.
+        // But for display, if we have mixed state (pinned/unpinned split),
+        // the group in "Pinned" section will have all pinned items.
+        // The group in "Unpinned" section will have all unpinned items.
+        // So checking the first one is sufficient as they are grouped by pin status first.
+        notifications.first?.isPinned ?? false
     }
     
     var body: some View {
@@ -372,6 +411,20 @@ struct NotificationGroupRow: View {
                 }
                 .buttonStyle(PlainButtonStyle())
                 .help("Archive All")
+                
+                Button(action: {
+                    let repo = notifications.first?.repository.fullName ?? ""
+                    let isPinned = notifications.first?.isPinned ?? false
+                    let groupId = "group|\(repo)|\(title)|\(isPinned ? "pinned" : "unpinned")"
+                    viewModel.togglePin(id: groupId)
+                }) {
+                    Image(systemName: isPinned ? "pin.fill" : "pin")
+                        .foregroundColor(isPinned ? .orange : .secondary)
+                        .padding(4)
+                        .rotationEffect(.degrees(isPinned ? 45 : 0))
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help(isPinned ? "Unpin Group" : "Pin Group")
             }
         }
         .padding()

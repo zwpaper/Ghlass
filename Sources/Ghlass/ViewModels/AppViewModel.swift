@@ -115,6 +115,11 @@ class AppViewModel: ObservableObject {
 
             // Unread Filter
             if showUnreadOnly && !notification.unread {
+                // Keep pinned items visible
+                if notification.isPinned {
+                    return true
+                }
+                
                 // Keep the currently selected/viewed notification visible even if read
                 let isSelected = (selectedNotificationId == notification.id)
 
@@ -141,12 +146,11 @@ class AppViewModel: ObservableObject {
         .sorted { $0.updatedAt > $1.updatedAt }
     }
 
-    var displayItems: [NotificationDisplayItem] {
-        let filtered = filteredNotifications
+    private func makeDisplayItems(from notifications: [GitHubNotification]) -> [NotificationDisplayItem] {
         var groups: [String: [GitHubNotification]] = [:] // Key: "repo|normalizedTitle"
         var singles: [GitHubNotification] = []
 
-        for notification in filtered {
+        for notification in notifications {
             if notification.subject.type == "CheckSuite" {
                 let normalizedTitle = normalizeCheckSuiteTitle(notification.subject.title)
                 let key = "\(notification.repository.fullName)|\(normalizedTitle)"
@@ -172,6 +176,19 @@ class AppViewModel: ObservableObject {
 
         // Sort by updatedAt
         return items.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    var pinnedDisplayItems: [NotificationDisplayItem] {
+        makeDisplayItems(from: filteredNotifications.filter { $0.isPinned })
+    }
+
+    var unpinnedDisplayItems: [NotificationDisplayItem] {
+        makeDisplayItems(from: filteredNotifications.filter { !$0.isPinned })
+    }
+    
+    // Legacy support if needed, or just for counting
+    var displayItems: [NotificationDisplayItem] {
+        pinnedDisplayItems + unpinnedDisplayItems
     }
 
     private func normalizeCheckSuiteTitle(_ title: String) -> String {
@@ -327,6 +344,67 @@ class AppViewModel: ObservableObject {
         // 3. Sync to GitHub (mark as read)
         Task {
             try? await GitHubService.shared.markAsRead(notificationId: id)
+        }
+    }
+
+    func togglePin(id: String) {
+        // Handle group ID
+        if id.hasPrefix("group|") {
+            // Find the group items
+            // We need to search in both pinned and unpinned to find the group
+            // Actually, we can just search in `displayItems` which is a computed property combining both
+            if let item = displayItems.first(where: { $0.id == id }),
+               case .group(_, let notifications) = item {
+                
+                // Determine new state: if any is unpinned, pin all. If all pinned, unpin all.
+                let allPinned = notifications.allSatisfy { $0.isPinned }
+                let newPinned = !allPinned
+                
+                for notification in notifications {
+                    updatePinState(id: notification.id, isPinned: newPinned)
+                }
+                
+                // Update selection if this group was selected
+                if selectedNotificationId == id {
+                     if id.hasSuffix("|pinned") {
+                         selectedNotificationId = id.replacingOccurrences(of: "|pinned", with: "|unpinned")
+                     } else if id.hasSuffix("|unpinned") {
+                         selectedNotificationId = id.replacingOccurrences(of: "|unpinned", with: "|pinned")
+                     }
+                }
+                
+                // Update Set selection if needed
+                if selectedNotificationIds.contains(id) {
+                    selectedNotificationIds.remove(id)
+                    let newId: String
+                    if id.hasSuffix("|pinned") {
+                        newId = id.replacingOccurrences(of: "|pinned", with: "|unpinned")
+                    } else {
+                        newId = id.replacingOccurrences(of: "|unpinned", with: "|pinned")
+                    }
+                    selectedNotificationIds.insert(newId)
+                }
+            }
+        } else {
+            // Single notification
+            if let notification = notifications.first(where: { $0.id == id }) {
+                updatePinState(id: id, isPinned: !notification.isPinned)
+            }
+        }
+    }
+
+    private func updatePinState(id: String, isPinned: Bool) {
+        if let index = notifications.firstIndex(where: { $0.id == id }) {
+            var updated = notifications[index]
+            updated.isPinned = isPinned
+            
+            // Update DB
+            DatabaseService.shared.markNotificationAsPinned(threadId: id, pinned: isPinned)
+            
+            // Update memory
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                notifications[index] = updated
+            }
         }
     }
 
@@ -558,7 +636,8 @@ enum NotificationDisplayItem: Identifiable, Hashable {
             return n.id
         case .group(let title, let notifications):
             let repo = notifications.first?.repository.fullName ?? ""
-            return "group|\(repo)|\(title)"
+            let isPinned = notifications.first?.isPinned ?? false
+            return "group|\(repo)|\(title)|\(isPinned ? "pinned" : "unpinned")"
         }
     }
 
