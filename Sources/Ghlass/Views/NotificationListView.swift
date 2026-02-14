@@ -3,6 +3,8 @@ import AppKit
 
 struct NotificationListView: View {
     @ObservedObject var viewModel: AppViewModel
+    @State private var showAddSheet = false
+    @State private var newItemUrl = ""
 
     var body: some View {
         VStack {
@@ -86,6 +88,14 @@ struct NotificationListView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button(action: {
+                    showAddSheet = true
+                }) {
+                    Label("Add Item", systemImage: "plus")
+                }
+            }
+
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: {
                     Task {
                         await viewModel.markSelectedAsDone()
                     }
@@ -112,6 +122,43 @@ struct NotificationListView: View {
                 }
                 .disabled(viewModel.isLoading)
             }
+        }
+        .sheet(isPresented: $showAddSheet) {
+            VStack(spacing: 20) {
+                Text("Add Pinned Item")
+                    .font(.headline)
+                
+                TextField("GitHub Issue or PR URL", text: $newItemUrl)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .frame(width: 300)
+                
+                HStack {
+                    Button("Cancel") {
+                        showAddSheet = false
+                        newItemUrl = ""
+                    }
+                    
+                    Button("Add") {
+                        Task {
+                            await viewModel.addPinnedItem(from: newItemUrl)
+                            showAddSheet = false
+                            newItemUrl = ""
+                        }
+                    }
+                    .disabled(newItemUrl.isEmpty)
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding()
+            .frame(width: 350, height: 150)
+        }
+        .alert("Error", isPresented: Binding<Bool>(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(viewModel.errorMessage ?? "")
         }
     }
     

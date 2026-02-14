@@ -551,6 +551,120 @@ class AppViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Add Pinned Item
+
+    func addPinnedItem(from webUrl: String) async {
+        // 1. Parse URL
+        // Expected format: https://github.com/owner/repo/pull/123 or https://github.com/owner/repo/issues/123
+        
+        guard let url = URL(string: webUrl),
+              url.host == "github.com" else {
+            self.errorMessage = "Invalid GitHub URL"
+            return
+        }
+        
+        let components = url.pathComponents
+        // pathComponents: ["/", "owner", "repo", "pull", "123"]
+        
+        guard components.count >= 5 else {
+            self.errorMessage = "Invalid GitHub URL format"
+            return
+        }
+        
+        let owner = components[1]
+        let repo = components[2]
+        let type = components[3] // "pull" or "issues"
+        let number = components[4]
+        
+        // Validate type
+        let apiType: String
+        let subjectType: String
+        if type == "pull" {
+            apiType = "pulls"
+            subjectType = "PullRequest"
+        } else if type == "issues" {
+            apiType = "issues"
+            subjectType = "Issue"
+        } else {
+            self.errorMessage = "Only Issues and Pull Requests are supported"
+            return
+        }
+        
+        let apiUrl = "https://api.github.com/repos/\(owner)/\(repo)/\(apiType)/\(number)"
+        
+        isLoading = true
+        defer { isLoading = false }
+        
+        do {
+            // 2. Fetch Details
+            let detail = try await GitHubService.shared.fetchResourceDetail(url: apiUrl)
+            
+            // 3. Create Notification Object
+            // We need to construct a GitHubNotification manually.
+            // ID: generated unique ID, e.g., "manual-owner-repo-number"
+            let id = "manual-\(owner)-\(repo)-\(number)"
+            
+            let repository = GitHubRepository(
+                id: 0, // Dummy ID
+                name: repo,
+                fullName: "\(owner)/\(repo)",
+                owner: GitHubOwner(login: owner, avatarUrl: "")
+            )
+            
+            let subject = NotificationSubject(
+                title: detail.title,
+                type: subjectType,
+                url: apiUrl
+            )
+            
+            let notification = GitHubNotification(
+                id: id,
+                repository: repository,
+                subject: subject,
+                reason: "manual",
+                unread: false,
+                updatedAt: detail.updatedAt,
+                url: apiUrl,
+                isDone: false,
+                isPinned: true
+            )
+            
+            // 4. Save to DB and Update Memory
+            DatabaseService.shared.upsertNotificationThread(notification)
+            DatabaseService.shared.markNotificationAsPinned(threadId: id, pinned: true)
+            
+            // Also save the detail
+            if let num = Int(number) {
+                DatabaseService.shared.upsertIssuePr(
+                    issue: detail,
+                    repoFullName: repository.fullName,
+                    number: num,
+                    type: subjectType
+                )
+            }
+            
+            // Update UI
+            await MainActor.run {
+                // Check if it already exists to avoid duplicates or overwrite
+                if let index = notifications.firstIndex(where: { $0.id == id }) {
+                    notifications[index] = notification
+                } else {
+                    notifications.insert(notification, at: 0)
+                }
+                // Sort
+                notifications.sort { $0.updatedAt > $1.updatedAt }
+                
+                // Fetch comments/etc
+                Task {
+                    await fetchDetail(for: notification)
+                }
+            }
+            
+        } catch {
+            self.errorMessage = "Failed to add item: \(error.localizedDescription)"
+        }
+    }
+
     // MARK: - Action Runs Support
 
     private func syncActionRuns(for repos: Set<String>) async {
