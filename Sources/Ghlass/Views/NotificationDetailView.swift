@@ -30,181 +30,189 @@ struct NotificationDetailView: View {
     @State private var lastNotificationId: String = ""
 
     var body: some View {
-        ZStack(alignment: .top) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                // Title & Body Section (Grouped)
+                let cacheKey = notification.cacheKey
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    // Spacer for sticky header
-                    Color.clear.frame(height: 60)
+                if !cacheKey.isEmpty {
+                    if notification.subject.type == "CheckSuite", let checkSuiteDetail = viewModel.checkSuiteCache[cacheKey] {
+                        CheckSuiteDetailView(detail: checkSuiteDetail, title: notification.subject.title, repoName: notification.repository.fullName, viewModel: viewModel)
+                    } else if notification.subject.type == "Release", let release = viewModel.releaseCache[cacheKey] {
+                        ReleaseDetailView(release: release, webViewHeight: $webViewHeight, isWebViewLoading: $isWebViewLoading)
+                    } else if let detail = viewModel.detailsCache[cacheKey] {
+                        VStack(alignment: .leading, spacing: 0) {
+                            // Author & Description
+                            VStack(alignment: .leading, spacing: 16) {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    HStack(alignment: .center, spacing: 12) {
+                                        AsyncImage(url: URL(string: detail.user.avatarUrl)) { image in
+                                            image
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fill)
+                                        } placeholder: {
+                                            Circle()
+                                                .fill(LinearGradient(
+                                                    colors: [Color.blue.opacity(0.3), Color.purple.opacity(0.3)],
+                                                    startPoint: .topLeading,
+                                                    endPoint: .bottomTrailing
+                                                ))
+                                        }
+                                        .frame(width: 40, height: 40)
+                                        .clipShape(Circle())
+                                        .overlay(
+                                            Circle()
+                                                .stroke(Color.white.opacity(0.2), lineWidth: 2)
+                                        )
 
-                    // Title & Body Section (Grouped)
-                    let cacheKey = notification.cacheKey
-                    
-                    if !cacheKey.isEmpty {
-                        if notification.subject.type == "CheckSuite", let checkSuiteDetail = viewModel.checkSuiteCache[cacheKey] {
-                            CheckSuiteDetailView(detail: checkSuiteDetail, title: notification.subject.title, repoName: notification.repository.fullName, viewModel: viewModel)
-                        } else if notification.subject.type == "Release", let release = viewModel.releaseCache[cacheKey] {
-                            ReleaseDetailView(release: release, webViewHeight: $webViewHeight, isWebViewLoading: $isWebViewLoading)
-                        } else if let detail = viewModel.detailsCache[cacheKey] {
-                            VStack(alignment: .leading, spacing: 0) {
-                                // Author & Description
-                                VStack(alignment: .leading, spacing: 16) {
-                                    VStack(alignment: .leading, spacing: 12) {
-                                        HStack(alignment: .center, spacing: 12) {
-                                            AsyncImage(url: URL(string: detail.user.avatarUrl)) { image in
-                                                image
-                                                    .resizable()
-                                                    .aspectRatio(contentMode: .fill)
-                                            } placeholder: {
-                                                Circle()
-                                                    .fill(LinearGradient(
-                                                        colors: [Color.blue.opacity(0.3), Color.purple.opacity(0.3)],
-                                                        startPoint: .topLeading,
-                                                        endPoint: .bottomTrailing
-                                                    ))
-                                            }
-                                            .frame(width: 40, height: 40)
-                                            .clipShape(Circle())
-                                            .overlay(
-                                                Circle()
-                                                    .stroke(Color.white.opacity(0.2), lineWidth: 2)
-                                            )
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(detail.user.login)
+                                                .font(.headline)
 
-                                            VStack(alignment: .leading, spacing: 2) {
-                                                Text(detail.user.login)
-                                                    .font(.headline)
+                                            Text("opened this \(notification.subject.type.lowercased())")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
 
-                                                Text("opened this \(notification.subject.type.lowercased())")
-                                                    .font(.caption)
-                                                    .foregroundColor(.secondary)
-                                            }
+                                        Spacer()
 
-                                            Spacer()
-
-                                            VStack(alignment: .trailing, spacing: 2) {
-                                                if let createdAt = detail.createdAt {
-                                                    Text("Created \(createdAt.formatted(date: .abbreviated, time: .shortened))")
-                                                        .font(.caption2)
-                                                        .foregroundColor(.secondary)
-                                                }
-                                                Text("Updated \(detail.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                                        VStack(alignment: .trailing, spacing: 2) {
+                                            if let createdAt = detail.createdAt {
+                                                Text("Created \(createdAt.formatted(date: .abbreviated, time: .shortened))")
                                                     .font(.caption2)
                                                     .foregroundColor(.secondary)
                                             }
-                                        }
-
-                                        if let assignees = detail.assignees, !assignees.isEmpty {
-                                            HStack(spacing: 8) {
-                                                Label("Assignees:", systemImage: "person.2")
-                                                    .font(.caption)
-                                                    .foregroundColor(.secondary)
-
-                                                ForEach(assignees, id: \.login) { assignee in
-                                                    AsyncImage(url: URL(string: assignee.avatarUrl)) { image in
-                                                        image.resizable().aspectRatio(contentMode: .fill)
-                                                    } placeholder: {
-                                                        Circle().fill(Color.gray.opacity(0.3))
-                                                    }
-                                                    .frame(width: 20, height: 20)
-                                                    .clipShape(Circle())
-                                                    .help(assignee.login)
-                                                }
-                                            }
-                                        }
-
-                                        if let labels = detail.labels, !labels.isEmpty {
-                                            FlowLayout(spacing: 6) {
-                                                ForEach(labels) { label in
-                                                    LabelBadge(label: label)
-                                                }
-                                            }
-                                        }
-
-                                        if detail.isMerged, let mergedBy = detail.mergedBy, let mergedAt = detail.mergedAt {
-                                            HStack(spacing: 6) {
-                                                Image(systemName: "arrow.left.to.line.circle.fill")
-                                                    .foregroundColor(.purple)
-                                                    .font(.caption)
-
-                                                Text("Merged by")
-                                                    .font(.caption)
-                                                    .foregroundColor(.secondary)
-
-                                                HStack(spacing: 4) {
-                                                    AsyncImage(url: URL(string: mergedBy.avatarUrl)) { image in
-                                                        image.resizable().aspectRatio(contentMode: .fill)
-                                                    } placeholder: {
-                                                        Circle().fill(Color.gray.opacity(0.3))
-                                                    }
-                                                    .frame(width: 16, height: 16)
-                                                    .clipShape(Circle())
-
-                                                    Text(mergedBy.login)
-                                                        .font(.caption)
-                                                        .fontWeight(.medium)
-                                                }
-
-                                                Text("at \(mergedAt.formatted(date: .abbreviated, time: .shortened))")
-                                                    .font(.caption)
-                                                    .foregroundColor(.secondary)
-                                            }
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(Color.purple.opacity(0.1))
-                                            .clipShape(Capsule())
+                                            Text("Updated \(detail.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
                                         }
                                     }
 
-                                    if let bodyHtml = detail.bodyHtml, !bodyHtml.isEmpty {
-                                        Divider()
-                                            .background(Color.white.opacity(0.1))
+                                    // Status & Stats Row
+                                    HStack(spacing: 8) {
+                                        StateBadge(state: detail.state, isMerged: detail.isMerged, type: notification.subject.type)
 
-                                        ZStack {
-                                            WebView(htmlContent: bodyHtml, dynamicHeight: $webViewHeight, isLoading: $isWebViewLoading)
-                                                .frame(height: webViewHeight > 0 ? webViewHeight : 100)
-                                                .opacity(isWebViewLoading ? 0 : 1)
+                                        if let additions = detail.additions, let deletions = detail.deletions {
+                                            HStack(spacing: 6) {
+                                                Text("+\(additions)").foregroundColor(.green)
+                                                Text("-\(deletions)").foregroundColor(.red)
+                                            }
+                                            .font(.caption.monospaced())
+                                        }
+                                    }
 
-                                            if isWebViewLoading {
-                                                VStack(alignment: .leading, spacing: 8) {
-                                                    ForEach(0..<3) { _ in
-                                                        RoundedRectangle(cornerRadius: 4)
-                                                            .fill(Color.gray.opacity(0.2))
-                                                            .frame(height: 14)
-                                                            .frame(maxWidth: .infinity)
-                                                    }
-                                                    RoundedRectangle(cornerRadius: 4)
-                                                        .fill(Color.gray.opacity(0.2))
-                                                        .frame(width: 200, height: 14)
+                                    if let assignees = detail.assignees, !assignees.isEmpty {
+                                        HStack(spacing: 8) {
+                                            Label("Assignees:", systemImage: "person.2")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+
+                                            ForEach(assignees, id: \.login) { assignee in
+                                                AsyncImage(url: URL(string: assignee.avatarUrl)) { image in
+                                                    image.resizable().aspectRatio(contentMode: .fill)
+                                                } placeholder: {
+                                                    Circle().fill(Color.gray.opacity(0.3))
                                                 }
-                                                .shimmer()
+                                                .frame(width: 20, height: 20)
+                                                .clipShape(Circle())
+                                                .help(assignee.login)
                                             }
                                         }
-                                    } else if let body = detail.body, !body.isEmpty {
+                                    }
 
-                                        Divider()
-                                            .background(Color.white.opacity(0.1))
-
-                                        Markdown(body)
-                                            .textSelection(.enabled)
-                                            .markdownTextStyle(\.text) {
-                                                FontSize(14)
-                                                ForegroundColor(.primary)
+                                    if let labels = detail.labels, !labels.isEmpty {
+                                        FlowLayout(spacing: 6) {
+                                            ForEach(labels) { label in
+                                                LabelBadge(label: label)
                                             }
-                                    } else {
-                                        Divider()
-                                            .background(Color.white.opacity(0.1))
+                                        }
+                                    }
 
-                                        Text("No description provided.")
-                                            .font(.callout)
-                                            .foregroundColor(.secondary)
-                                            .italic()
+                                    if detail.isMerged, let mergedBy = detail.mergedBy, let mergedAt = detail.mergedAt {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "arrow.left.to.line.circle.fill")
+                                                .foregroundColor(.purple)
+                                                .font(.caption)
+
+                                            Text("Merged by")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+
+                                            HStack(spacing: 4) {
+                                                AsyncImage(url: URL(string: mergedBy.avatarUrl)) { image in
+                                                    image.resizable().aspectRatio(contentMode: .fill)
+                                                } placeholder: {
+                                                    Circle().fill(Color.gray.opacity(0.3))
+                                                }
+                                                .frame(width: 16, height: 16)
+                                                .clipShape(Circle())
+
+                                                Text(mergedBy.login)
+                                                    .font(.caption)
+                                                    .fontWeight(.medium)
+                                            }
+
+                                            Text("at \(mergedAt.formatted(date: .abbreviated, time: .shortened))")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(Color.purple.opacity(0.1))
+                                        .clipShape(Capsule())
                                     }
                                 }
-                                .padding(20)
-                            }
-                            .bubbleEffect(cornerRadius: 16)
 
-                            // Comments Section (Ungrouped)
+                                if let bodyHtml = detail.bodyHtml, !bodyHtml.isEmpty {
+                                    Divider()
+                                        .background(Color.white.opacity(0.1))
+
+                                    ZStack {
+                                        WebView(htmlContent: bodyHtml, dynamicHeight: $webViewHeight, isLoading: $isWebViewLoading)
+                                            .frame(height: webViewHeight > 0 ? webViewHeight : 100)
+                                            .opacity(isWebViewLoading ? 0 : 1)
+
+                                        if isWebViewLoading {
+                                            VStack(alignment: .leading, spacing: 8) {
+                                                ForEach(0..<3) { _ in
+                                                    RoundedRectangle(cornerRadius: 4)
+                                                        .fill(Color.gray.opacity(0.2))
+                                                        .frame(height: 14)
+                                                        .frame(maxWidth: .infinity)
+                                                }
+                                                RoundedRectangle(cornerRadius: 4)
+                                                    .fill(Color.gray.opacity(0.2))
+                                                    .frame(width: 200, height: 14)
+                                            }
+                                            .shimmer()
+                                        }
+                                    }
+                                } else if let body = detail.body, !body.isEmpty {
+
+                                    Divider()
+                                        .background(Color.white.opacity(0.1))
+
+                                    Markdown(body)
+                                        .textSelection(.enabled)
+                                        .markdownTextStyle(\.text) {
+                                            FontSize(14)
+                                            ForegroundColor(.primary)
+                                        }
+                                } else {
+                                    Divider()
+                                        .background(Color.white.opacity(0.1))
+
+                                    Text("No description provided.")
+                                        .font(.callout)
+                                        .foregroundColor(.secondary)
+                                        .italic()
+                                }
+                            }
+                            .padding(20)
+                        }
+                        .bubbleEffect(cornerRadius: 16)
+
+                        // Comments Section (Ungrouped)
 
                         // Check if we have comments OR if it's merged (since merged event is a timeline item)
                         let timelineItems = getTimelineItems(url: cacheKey)
@@ -320,10 +328,6 @@ struct NotificationDetailView: View {
             }
             .padding(24)
         }
-
-            // Sticky Header
-            DetailHeaderView(notification: notification, detail: viewModel.detailsCache[notification.cacheKey], viewModel: viewModel)
-        }
         .background(
             ZStack {
                 // Base layer
@@ -342,6 +346,41 @@ struct NotificationDetailView: View {
                 .ignoresSafeArea()
             }
         )
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 2) {
+                    Text(notification.repository.fullName)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Text(notification.subject.title)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .padding(.horizontal, 20)
+                .frame(maxWidth: .infinity)
+            }
+
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: {
+                    Task { await viewModel.markAsDone(ids: [notification.id]) }
+                }) {
+                    Label("Archive", systemImage: "archivebox")
+                }
+                .help("Archive")
+            }
+
+            ToolbarItem(placement: .primaryAction) {
+                if let detail = viewModel.detailsCache[notification.cacheKey], let url = URL(string: detail.htmlUrl) {
+                    Button(action: {
+                        NSWorkspace.shared.open(url)
+                    }) {
+                        Label("Open in GitHub", systemImage: "arrow.up.right")
+                    }
+                    .help("Open in GitHub")
+                }
+            }
+        }
         .id(notification.id)
         .onAppear {
             Task {
@@ -631,15 +670,7 @@ struct StateBadge: View {
                 .font(.caption)
                 .fontWeight(.semibold)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
         .foregroundColor(statusColor)
-        .background(statusColor.opacity(0.1))
-        .glassEffect(cornerRadius: 20, material: .ultraThinMaterial)
-        .overlay(
-            Capsule()
-                .stroke(statusColor.opacity(0.3), lineWidth: 1)
-        )
     }
 
     var statusText: String {
@@ -669,83 +700,7 @@ struct StateBadge: View {
     }
 }
 
-struct DetailHeaderView: View {
-    let notification: GitHubNotification
-    let detail: GitHubResourceDetail?
-    @ObservedObject var viewModel: AppViewModel
 
-    var body: some View {
-        HStack(spacing: 0) {
-            // Left: Status & Stats
-            HStack(spacing: 12) {
-                if let detail = detail {
-                    StateBadge(state: detail.state, isMerged: detail.isMerged, type: notification.subject.type)
-
-                    if let additions = detail.additions, let deletions = detail.deletions {                        HStack(spacing: 6) {
-                            Text("+\(additions)").foregroundColor(.green)
-                            Text("-\(deletions)").foregroundColor(.red)
-                        }
-                        .font(.caption.monospaced())
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .bubbleEffect(cornerRadius: 20)
-                    }
-                } else if let url = notification.subject.url, let checkSuiteDetail = viewModel.checkSuiteCache[url], let run = checkSuiteDetail.workflowRun {
-                     StatusBadge(status: run.status, conclusion: run.conclusion)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            // Middle: Repo & Title
-            VStack(spacing: 2) {
-                Text(notification.repository.fullName)
-                    .font(.caption2)
-                    .fontWeight(.medium)
-                    .foregroundColor(.secondary)
-
-                Text(notification.subject.title)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 10)
-            .bubbleEffect(cornerRadius: 20)
-            .frame(maxWidth: .infinity, alignment: .center)
-
-            // Right: Actions
-            HStack(spacing: 8) {
-                Button(action: {
-                    Task { await viewModel.markAsDone(ids: [notification.id]) }
-                }) {
-                    Image(systemName: "archivebox")
-                        .font(.body)
-                        .foregroundColor(.secondary)
-                        .padding(10)
-                        .bubbleEffect(cornerRadius: 20)
-                }
-                .buttonStyle(.plain)
-                .help("Archive")
-
-                if let detail = detail, let url = URL(string: detail.htmlUrl) {
-                    Link(destination: url) {
-                        Image(systemName: "arrow.up.right")
-                            .font(.body)
-                            .foregroundColor(.secondary)
-                            .padding(10)
-                            .bubbleEffect(cornerRadius: 20)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Open in GitHub")
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .trailing)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-    }
-}
 
 struct SkeletonDetailView: View {
     var body: some View {
